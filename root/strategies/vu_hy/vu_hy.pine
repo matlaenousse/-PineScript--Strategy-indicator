@@ -1,0 +1,140 @@
+//@version=5
+strategy("VU_HY Strategy", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=10)
+
+// Strategy based on Vumanchu Cypher B Replica and Hybrid Overbought/Oversold Detector
+// Buy signal conditions:
+// 1. Green dot appearing (buySignal from Vumanchu)
+// 2. Wave below -60 level (wt2 < -60 from Vumanchu)
+// 3. Stochastic level below 10 (stochK < 10 from Vumanchu)
+// 4. RSI below 40 (rsi < 40 from Vumanchu)
+// 5. Call color trigger on Hybrid detector (hybrid <= hybOS from Hybrid)
+
+// ===== VUMAN CHU CYPHER B REPLICA CALCULATIONS =====
+
+wtChannelLen = input(9, "WT Channel Length")
+wtAverageLen = input(12, "WT Average Length")
+wtMALen = input(3, "WT MA Length")
+wtMASource = input(hlc3, "WT MA Source")
+
+rsiSRC = input(close, "RSI Source")
+rsiLen = input(14, "RSI Length")
+rsiOversold = input(30, "RSI Oversold")
+rsiOverbought = input(60, "RSI Overbought")
+
+stochSRC = input(close, "Stochastic Source")
+stochLen = input(14, "Stochastic Length")
+stochRsiLen = input(14, "RSI Length for Stoch")
+stochKSmooth = input(3, "Stochastic K Smooth")
+stochDSmooth = input(3, "Stochastic D Smooth")
+stochUseLog = input(true, "Use Log for Stoch")
+
+osLevel2 = input(-60, "WT Oversold Level 2")
+
+// WaveTrend calculations
+esa = ta.ema(wtMASource, wtChannelLen)
+de = ta.ema(math.abs(wtMASource - esa), wtChannelLen)
+ci = (wtMASource - esa) / (0.015 * de)
+wt1 = ta.ema(ci, wtAverageLen)
+wt2 = ta.sma(wt1, wtMALen)
+wtOversold = wt2 <= osLevel2
+wtCross = ta.cross(wt1, wt2)
+wtCrossUp = wt2 - wt1 <= 0
+
+// RSI calculations
+rsi = ta.rsi(rsiSRC, rsiLen)
+
+// Stochastic RSI calculations
+src = stochUseLog ? math.log(stochSRC) : stochSRC
+rsi_stoch = ta.rsi(src, stochRsiLen)
+stochK = ta.sma(ta.stoch(rsi_stoch, rsi_stoch, rsi_stoch, stochLen), stochKSmooth)
+
+// Vumanchu signals
+greenDot = wtCross and wtCrossUp and wt2 <= -53  // buySignal condition
+waveBelowNeg60 = wt2 <= -60
+stochBelow10 = stochK < 10
+rsiBelow40 = rsi < 40
+
+// ===== HYBRID OVERBOUGHT/OVERSOLD DETECTOR CALCULATIONS =====
+
+// Hybrid inputs
+tf = input.timeframe("", "Calculations Time Frame")
+ticker = input.symbol("", "Ticker ID")
+src_hyb = input(close, "Hybrid Source")
+len_hyb = input.int(14, "Length")
+
+// Oscillator usage (simplified - using main ones)
+useB = input.bool(true, "Bollinger Bands %B")
+useRsi_hyb = input.bool(true, "RSI")
+useSto_hyb = input.bool(true, "Stochastic")
+
+// Manual levels (set to auto-calculate)
+obManual = input.int(100, "Alert Levels → OB")
+osManual = input.int(0, "OS")
+
+// Oscillator calculations (simplified version)
+[bb_middle, bb_upper, bb_lower] = ta.bb(src_hyb, len_hyb, 2)
+b_hyb = (src_hyb - bb_lower) / (bb_upper - bb_lower) * 100  // %B
+cci_hyb = ta.cci(src_hyb, len_hyb)
+cmf_hyb = math.sum((high == low) ? 0 : volume * (2 * src_hyb - low - high) / (high - low), len_hyb) / math.sum(volume, len_hyb)  // CMF
+cmo_hyb = ta.cmo(src_hyb, len_hyb)
+dix_hyb = (((src_hyb - ta.sma(src_hyb, len_hyb)) / ta.sma(src_hyb, len_hyb) * 100) + 1) * 50  // DIX
+k_hyb = (src_hyb - (ta.ema(src_hyb, len_hyb) - ta.atr(len_hyb))) / (2 * ta.atr(len_hyb))  // %K
+mfi_hyb = ta.mfi(src_hyb, len_hyb)
+roc_hyb = ta.roc(src_hyb, len_hyb)
+rsi_hyb = ta.rsi(src_hyb, len_hyb)
+rvi_hyb = ((math.sum(ta.swma(close - open), len_hyb) / math.sum(ta.swma(high - low), len_hyb)) + 1) * 50  // RVI
+sto_hyb = ta.stoch(src_hyb, high, low, len_hyb)
+tmf_hyb = ta.ema((((src_hyb - math.min(low, src_hyb[1])) - (math.max(high, src_hyb[1]) - src_hyb)) / (math.max(high, src_hyb[1]) - math.min(low, src_hyb[1]))) * volume, len_hyb) / ta.ema(volume, len_hyb)  // TMF
+
+// Count active oscillators
+oscCount = 0
+if useB and not na(b_hyb)
+    oscCount += 1
+if useRsi_hyb and not na(rsi_hyb)
+    oscCount += 1
+if useSto_hyb and not na(sto_hyb)
+    oscCount += 1
+
+// Overbought/Oversold calculation (simplified)
+percentOB = 100.
+bit = 100 / oscCount
+if useB and b_hyb <= 0  // Simplified OB condition
+    percentOB -= bit
+if useRsi_hyb and rsi_hyb <= 30  // Simplified OB condition
+    percentOB -= bit
+if useSto_hyb and sto_hyb <= 20  // Simplified OB condition
+    percentOB -= bit
+
+percentOS = 100.
+if useB and b_hyb >= 100  // Simplified OS condition
+    percentOS -= bit
+if useRsi_hyb and rsi_hyb >= 70  // Simplified OS condition
+    percentOS -= bit
+if useSto_hyb and sto_hyb >= 80  // Simplified OS condition
+    percentOS -= bit
+
+hybrid = (percentOB - percentOS + 100) / 2
+hybOB = obManual == 100 ? 75 : obManual  // Simplified auto level
+hybOS = osManual == 0 ? 25 : osManual    // Simplified auto level
+
+// Hybrid signals
+callColorTrigger = hybrid <= hybOS
+
+// ===== STRATEGY LOGIC =====
+
+// Combined buy condition
+buyCondition = greenDot and waveBelowNeg60 and stochBelow10 and rsiBelow40 and callColorTrigger
+
+// Entry
+if buyCondition
+    strategy.entry("Buy", strategy.long)
+
+// Plots for visualization
+plot(greenDot ? wt2 : na, color=color.green, style=plot.style_circles, linewidth=3, title="Green Dot Signal")
+plot(waveBelowNeg60 ? wt2 : na, color=color.blue, style=plot.style_circles, linewidth=2, title="Wave Below -60")
+plot(stochBelow10 ? stochK : na, color=color.orange, style=plot.style_circles, linewidth=2, title="Stoch Below 10")
+plot(rsiBelow40 ? rsi : na, color=color.purple, style=plot.style_circles, linewidth=2, title="RSI Below 40")
+plot(callColorTrigger ? hybrid : na, color=color.teal, style=plot.style_circles, linewidth=2, title="Hybrid Call Trigger")
+
+// Alert
+alertcondition(buyCondition, "Buy Signal", "Combined buy conditions met")

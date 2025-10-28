@@ -1,0 +1,120 @@
+There are many indicators of overbought/oversold conditions out there. Some of more common ones are:
+
+- Bollinger Bands %B
+- Money Flow Index (MFI)
+- Relative Strength Index (RSI)
+- Stochastic
+
+This script uses a combination of these 4 oscillators to confirm overbought/oversold and filter the signals of market reverse which could be used for trading binary options.
+You may select which oscillators you want to apply and of course change the source, the length of the calculations and the overbought/oversold levels.
+Also the script will draw a combined graph which is the average of the selected oscillators in the options.
+
+Send me your ideas!
+5 août 2020
+Notes de version
+A tweak to default OB/OS levels.
+6 août 2020
+Notes de version
+The 5th oscillator support added:
+- Chande Momentum Oscillator (CMO) could now be applied.
+18 août 2020
+Notes de version
+Small coding tweaks!
+21 août 2020
+Notes de version
+Added 50-Line which could be useful sometimes.
+27 août 2020
+Notes de version
+Changed the structure of the code a bit and removed "Total Average" graph due to uselessness!
+From now on, there is a new hybrid graph instead, which represents the OB/OS market exactly.
+27 août 2020
+Notes de version
+Added 0,100-lines to make a better display of Hybrid graph
+23 oct. 2020
+Notes de version
+- Added support for 3 new oscillators:
+6. Commodity Channel Index (CCI)
+7. Keltner Channel %K
+8. Rate Of Change (ROC)
+
+- Made some changes to default OB/OS levels and colors
+- Applied some coding tweaks
+26 oct. 2020
+Notes de version
+Major Update!
+Manual setting of OB/OS levels removed; Instead, a procedure of automatic levels detection implemented which leads to some advantages:
+- There is no more need for taking care of setting OB/OS levels manually by the user (specially an amateur one).
+- The whole process of OB/OS detection could fit any data from any feed automatically.
+- OB/OS levels could vary dynamically over time.
+
+So it's all about reacting to any changes in market conditions. Good Luck!
+28 oct. 2020
+Notes de version
+- Optimized OB/OS level calculations
+- Added labels to show calculated OB/OS levels (for those who wonder what the calculated levels are)
+31 oct. 2020
+Notes de version
+- Minor tweaks
+- Changed default options
+- Added weaker colorized signals which lead to better view and understanding of the chart, trends, divergences and thus more accurate decisions!
+2 nov. 2020
+Notes de version
+- Small coloring tweaks!
+14 nov. 2020
+Notes de version
+- Added Multi-Timeframe Capability.
+Calculations Timeframe could now be changed in options.
+14 nov. 2020
+Notes de version
+- Fixed higher timeframe levels calculation bug!
+20 nov. 2020
+Notes de version
+Made level calculations more strict
+13 déc. 2020
+Notes de version
+- Added support for 2 less common oscillators:
+9. Chaikin Money Flow (CMF)
+10. Twiggs Money Flow (TMF)
+14 déc. 2020
+Notes de version
+Fixed a bug related to TMF oversold calculation
+8 janv. 2021
+Notes de version
+- Fixed a multi-timeframes calculation bug
+- Increased calculations speed
+8 janv. 2021
+Notes de version
+- Fixed another problem related to an annoying Pine MTF functions bug!
+12 janv. 2021
+Notes de version
+- Just made the script more structured by implementing some functions
+13 févr. 2021
+Notes de version
+- Added support for 2 other oscillators:
+11. Disparity Index (DIX)
+12. Relative Vigor Index (RVI/RVGI)
+- Manual setting of OB/OS levels is now possible again. Feel free to set OB/OS levels as you wish or leave the options as they are to make the calculations automatic.
+3 avr. 2022
+Notes de version
+- Restructured the code
+- Converted to Pine v5
+- Increased overall performance
+- Made indicator settings more user-friendly
+- Added alert conditions to the settings
+- Made levels auto-calculation better
+- Killed some tiny bugs
+24 avr. 2023
+Notes de version
+- Fixed calculation errors for some tickers; Now the indicator should work on all charts!
+- Fixed DIX normalization error
+- Added auto-level option and made alerts better
+- Killed some tiny bugs and increased code performance
+24 avr. 2023
+Notes de version
+- Added symbol selection option; It's now possible to see OB/OS conditions of another ticker on current chart.
+- Added hybrid OB/OS levels and labels
++ 4 above-mentioned ones!
+24 avr. 2023
+Notes de version
+3rd update in one day!
+- At last, fixed issues regarding "The other time frame and ticker" calculations

@@ -1,0 +1,42 @@
+Market Cipher B
+12 nov. 2019
+Notes de version
+Added small green and red dot buy alerts in the wavetrend
+30 déc. 2019
+Notes de version
+adjusted channel length and HLC3
+30 déc. 2019
+Notes de version
+testing new paramters
+30 déc. 2019
+Notes de version
+testing
+18 juin 2020
+Notes de version
+added donation address :)
+3 nov. 2020
+Notes de version
+updated MFI and transparency parameters
+21 févr. 2021
+Notes de version
+Updated Vwap code
+10 avr. 2021
+Notes de version
+adjusted RSI colors closer comparison
+12 avr. 2021
+Notes de version
+removed for less confusion
+
+4 juin 2021
+Notes de version
+adjusted code parameters
+16 oct. 2023
+Notes de version
+This is an update; essentially, the code was broken since the money flow index was behind the momentum waves. This has now been corrected.
+
+Additionally, we modified the colours of Stochastic and turned on RSI by default.
+
+Our core focus is on other indicators so this code is going to be left as is for you all to enjoy and play with.
+23 oct. 2023
+Notes de version
+Adjusted color input customization
