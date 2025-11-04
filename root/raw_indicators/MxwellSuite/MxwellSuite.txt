@@ -1,0 +1,176 @@
+Introducing the Mxwll Price Action Suite!
+
+The Mxwll Price Action Suite is an all-in-one analysis indicator incorporating elements of SMC and also ideas extending beyond the trading methodology!
+
+Features
+
+Internal structures
+External structures
+Customizable Sensitivities
+BoS/CHoCH
+Order Blocks
+HH/LH/LL/LH Areas
+Rolling TF highs/lows
+Rolling Volume Comparisons
+Auto Fibs
+And more!
+
+
+snapshot
+
+
+The image above shows the indicator's market structure identification capabilities. Internal BoS and CHoCH structures in addition to overarching market structures are available with customizable sensitivities.
+
+snapshot
+
+
+The image above shows the indicator identifying order blocks! Additionally, HH/LH/LL/LH areas are also identified.
+
+snapshot
+
+
+The image above shows a rolling area of interest. These areas can be compared to supply/demand zones, where traders might consider a bargain long/short/sell area.
+
+snapshot
+
+
+The indicator displays a rolling 4hr high/low and 1D high/low, alongside auto fibonacci levels with a customizable sensitivity.
+
+snapshot
+
+
+Finally, the Mxwll Price Action Suite shows relevant session information.
+
+Table information
+Current Session
+Countdown to session close
+Next Session
+Countdown to next session open
+Rolling 4-Hr volume intensity
+Rolling 24-Hr volume intensity
+
+Introducing the Mxwll SMC Suite!
+
+The Mxwll SMC Suite is an all-in-one analysis indicator incorporating elements of SMC and also ideas extending beyond the trading methodology!
+
+Features
+
+Internal structures
+External structures
+Customizable Sensitivities
+BoS/CHoCH
+Order Blocks
+HH/LH/LL/LH Areas
+Rolling TF highs/lows
+Rolling Volume Comparisons
+Auto Fibs
+And more!
+
+
+snapshot
+
+
+The image above shows the indicator's market structure identification capabilities. Internal BoS and CHoCH structures in addition to overarching market structures are available with customizable sensitivities.
+
+snapshot
+
+
+The image above shows the indicator identifying order blocks! Additionally, HH/LH/LL/LH areas are also identified.
+
+snapshot
+
+
+The image above shows a rolling area of interest. These areas can be compared to supply/demand zones, where traders might consider a bargain long/short/sell area.
+
+snapshot
+
+
+The indicator displays a rolling 4hr high/low and 1D high/low, alongside auto fibonacci levels with a customizable sensitivity.
+
+snapshot
+
+
+Finally, the Mxwll Price Action Suite shows relevant session information.
+
+Table information
+Current Session
+Countdown to session close
+Next Session
+Countdown to next session open
+Rolling 4-Hr volume intensity
+Rolling 24-Hr volume intensity
+
+
+Expanded Features of Mxwll Price Action Suite
+
+Internal and External Structures
+
+Internal Structures: These elements refer to the price formations and patterns that occur within a smaller scope or a specific trading session. The suite can detect intricate details like minor support/resistance levels or short-term trend reversals.
+
+External Structures: These involve larger, more significant market patterns and trends spanning multiple sessions or time frames. This capability helps traders understand overarching market directions.
+
+Customizable Sensitivities
+
+Adjusting sensitivity settings allows users to tailor the indicator's responsiveness to market changes. Higher sensitivity can catch smaller fluctuations, while lower sensitivity might focus on more significant, reliable market moves.
+
+Break of Structure (BoS) and Change of Character (CHoCH)
+
+BoS: This feature identifies points where the price breaks a significant structure, potentially indicating a new trend or a trend reversal.
+
+CHoCH: Detects subtle shifts in the market's behavior, which could suggest the early stages of a trend change before they become apparent to the broader market.
+
+Order Blocks and Market Phases
+
+Order Blocks: These are essentially price levels or zones where significant trading activities previously occurred, likely pointing to the positions of smart money.
+
+HH/LH/LL/LH Areas: Identifying Higher Highs (HH), Lower Highs (LH), Lower Lows (LL), and Lower Highs (LH) helps in understanding the trend and market structure, aiding in predictive analysis.
+
+Rolling Timeframe Highs/Lows and Volume Comparisons
+
+Tracks highs and lows over specified rolling periods, providing dynamic support and resistance levels.
+
+Compares volume data across different timeframes to assess the strength or weakness of the current price movements.
+
+Auto Fibonacci Levels
+
+Automatically calculates and plots Fibonacci retracement levels, a popular tool among traders to identify potential reversal points based on past movements.
+
+Session Data and Volume Intensity
+
+Session Information: Displays current and upcoming trading sessions along with countdown timers, which is crucial for day traders and those trading on session overlaps.
+
+Volume Intensity: Measures and compares the volume within the last 4 hours and 24 hours to gauge market activity and potential breakout/breakdown movements.
+
+Visualizations and Practical Use
+
+Dynamic Visuals: The suite provides dynamic visual aids, such as real-time updating of high/low markers and Fibonacci levels, which adjust as new data comes in. This feature is critical in fast-paced markets.
+
+Strategic Entry/Exit Points: By identifying order blocks and using Fibonacci levels, traders can pinpoint strategic entry and exit points, maximizing potential returns.
+
+Risk Management: Enhanced features like session countdowns and volume intensity help in better risk management by providing traders with more data on market sentiment and potential volatility.
+
+
+
+28 avr. 2024
+Notes de version
+--Version 1.01
+
+- Corrected time until session close and time until next session calculations
+- Corrected 4hr rolling volume and 1D rolling volume calculations to work on timeframes greater than 4hr and 1D, respectively.
+-Added background gradient color that coordinates with current session
+
+snapshot
+
+
+30 avr. 2024
+Notes de version
+--Version 1.011
+
+Corrected an issue where rolling volume was only calculating in the last bar.
+30 avr. 2024
+Notes de version
+--Version 2
+
+Fair Value Gaps have been added! Adjustable color, ability to contract when violated, and other options available!
+
+Corrected a toggle issue with Auto Fibs - each fib can now be hidden individually and is color adjustable.
