@@ -1,0 +1,1034 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Stratégie fusionnée par IA (basée sur Vumanchu & MxwellSuite)
+
+//@version=5
+strategy("Stratégie Vumanchu-SMC", 
+     overlay=true, 
+     default_qty_type=strategy.percent_of_equity, 
+     default_qty_value=1, // Valeur par défaut (sera surchargée par les inputs)
+     commission_value=0.075, 
+     slippage=2, 
+     max_labels_count = 500, 
+     max_lines_count = 500, 
+     max_boxes_count = 500, 
+     max_bars_back = 500)
+
+// =============================================================================
+// 1. INPUTS DE STRATÉGIE (Requirement 5)
+// =============================================================================
+
+string strat_group = "==== Paramètres de la Stratégie ===="
+float strat_risk_perc = input.float(1.0, "Risque % par Trade", minval=0.1, maxval=100, step=0.1, group = strat_group)
+string strat_sl_type = input.string("Structurel", "Type de Stop Loss", options = ["Structurel", "ATR"], group = strat_group)
+float strat_atr_mult = input.float(2.0, "Multiplicateur ATR (si SL=ATR)", minval=0.1, step=0.1, group = strat_group)
+int   strat_atr_len = input.int(14, "Longueur ATR (si SL=ATR)", minval=1, group = strat_group)
+
+string strat_filter_group = "==== Filtres de la Stratégie ===="
+bool strat_filter_mfi = input.bool(true, "Utiliser le filtre: Vumanchu MFI Cloud?", group = strat_filter_group)
+bool strat_filter_bos = input.bool(true, "Utiliser le filtre: Mxwell BOS?", group = strat_filter_group)
+bool strat_filter_poi = input.bool(true, "Utiliser le filtre: Entrée sur POI (FVG/OB)?", group = strat_filter_group)
+bool strat_filter_dot = input.bool(true, "Utiliser le filtre: Vumanchu Green/Red Dot?", group = strat_filter_group)
+
+
+// =============================================================================
+// 2. CODE SOURCE MXWELLSUITE (Namespacé avec 'mxw_') (Requirement 3)
+// =============================================================================
+
+// === INPUTS MXWELLSUITE ===
+string mxw_smc_group = "MxwellSuite: Smart Money Concepts"
+color mxw_bullC     = input.color(defval = #14D990, title = "Bull Color", group = mxw_smc_group, inline = "7")
+color mxw_bearC     = input.color(defval = #F24968, title = "Bear Color", group = mxw_smc_group, inline = "7")
+bool mxw_showInt    = input.bool(defval = true, title = "Show Internals", group = mxw_smc_group)
+int mxw_intSens     = input.int(3, "Internals Sensitivity", options =  [3 , 5 , 8 ], group = mxw_smc_group, inline = "20")
+string mxw_intStru  = input.string(defval = "All", title = "Internal Structure", options = ["All", "BoS", "CHoCH"], inline = "30", group = mxw_smc_group)
+bool mxw_showExt    = input.bool(defval = true, title = "Show Externals" ,group = mxw_smc_group)
+int mxw_extSens     = input.int(25, "Externals Sensitivity", options = [10, 25, 50],group = mxw_smc_group, inline = "21")
+string mxw_extStru  = input.string(defval = "All", title = "External Structure", options = ["All", "BoS", "CHoCH"], inline = "31", group = mxw_smc_group)
+
+string mxw_swing_group = "MxwellSuite: Swing Blocks"
+bool mxw_showOB     = input.bool(defval = true, title = "Show Order Blocks" ,group = mxw_swing_group)
+int mxw_showLast    = input.int(defval = 10, title = "Swing Order Blocks", minval = 0, group = mxw_swing_group)
+bool mxw_showHHLH   = input.bool(defval = true, title = "Show HH/LH", group = mxw_swing_group)
+bool mxw_showHLLL   = input.bool(defval = true, title = "Show LH/LL", group = mxw_swing_group)
+bool mxw_showAOE    = input.bool(defval = true, title = "Show Area of Interest", group = mxw_swing_group)
+
+string mxw_hl_group = "MxwellSuite: High/Low"
+bool mxw_show1D     = input.bool(defval = true, title = "Show Previous Day High", group = mxw_hl_group)
+bool mxw_show1DLab  = input.bool(defval = true, title = "Show 1 Day Labels", group = mxw_hl_group)
+bool mxw_show4H     = input.bool(defval = true, title = "Show 4 Hour High", group = mxw_hl_group)
+bool mxw_show4hLab  = input.bool(defval = true, title = "Show 4 Hour Labels", group = mxw_hl_group)
+
+string mxw_fvg_group = "MxwellSuite: FVG"
+bool mxw_showFVG    = input.bool(defval = true, title = "Show Fair Value Gaps", group = mxw_fvg_group)
+bool mxw_contract   = input.bool(defval = false, title = "Contract Violated FVG", group = mxw_fvg_group)
+bool mxw_closeOnly  = input.bool(defval = false, title = "Show Closest Up/Down FVG Only", group = mxw_fvg_group)
+color mxw_fvgcol    = input.color(defval = #F2B807, title = "FVG Color", group = mxw_fvg_group)
+int mxw_fvgtra      = input.int(defval = 80, minval = 0, maxval = 100, title = "FVG Transparency", group = mxw_fvg_group)
+
+string mxw_fib_group = "MxwellSuite: Auto Fibs"
+bool mxw_showFibs   = input.bool(defval = true, title = "Show Auto Fibs", group = mxw_fib_group)
+bool mxw_show236    = input.bool(defval = true,  title = "", inline = "1", group = mxw_fib_group)
+bool mxw_show382    = input.bool(defval = true,  title = "", inline = "2", group = mxw_fib_group)
+bool mxw_show5      = input.bool(defval = true,    title = "", inline = "3", group = mxw_fib_group)
+bool mxw_show618    = input.bool(defval = true,  title = "", inline = "4", group = mxw_fib_group)
+bool mxw_show786    = input.bool(defval = true,  title = "", group = mxw_fib_group, inline = "5")
+float mxw_fib1      = input.float(defval = .236, title = "", minval = 0, step = 0.01, inline = "1", group = mxw_fib_group)
+float mxw_fib2      = input.float(defval = .382, title = "", minval = 0, step = 0.01, inline = "2", group = mxw_fib_group)
+float mxw_fib3      = input.float(defval = .5,   title = "", minval = 0, step = 0.01, inline = "3", group = mxw_fib_group)
+float mxw_fib4      = input.float(defval = .618, title = "", minval = 0, step = 0.01, inline = "4", group = mxw_fib_group)
+float mxw_fib5      = input.float(defval = .786, title = "", minval = 0, step = 0.01, group = mxw_fib_group, inline = "5")
+color mxw_fib1col   = input.color(title = "", defval = color.gray, inline = "1"  , group = mxw_fib_group)
+color mxw_fib2col   = input.color(title = "", defval = color.lime, inline = "2"  , group = mxw_fib_group)
+color mxw_fib3col   = input.color(title = "", defval = color.yellow, inline = "3", group = mxw_fib_group)
+color mxw_fib4col   = input.color(title = "", defval = color.orange, inline = "4", group = mxw_fib_group)
+color mxw_fib5col   = input.color(title = "", defval = color.red   , group = mxw_fib_group, inline = "5")
+
+// === VARIABLES & ARRAYS MXWELLSUITE ===
+var mxw_bigData = map.new<string, float>()
+if mxw_bigData.size() == 0
+    mxw_bigData.put("moving", 0)
+    mxw_bigData.put("upaxis", 0.0) 
+    mxw_bigData.put("upaxis2", 0)
+    mxw_bigData.put("dnaxis", 0.0) 
+    mxw_bigData.put("dnaxis2", 0)
+    mxw_bigData.put("upside", 1)
+    mxw_bigData.put("downside", 1)
+
+[mxw_pdHigh, mxw_pdLow, mxw_dayHigh, mxw_dayLow, mxw_pdBar, mxw_dayBar] = request.security(syminfo.tickerid, "1D", [high[1], low[1], high, low, time[1], time])
+
+var mxw_highArr = array.new_float(), var mxw_lowArr  = array.new_float()
+var mxw_timeArr = array.new_int  (), var mxw_volArr  = array.new_float()
+var mxw_closeArr = array.new_float(), var mxw_openArr = array.new_float()
+
+mxw_highArr.unshift(high), mxw_lowArr.unshift(low)
+mxw_timeArr.unshift(time), mxw_volArr.unshift(volume)
+mxw_closeArr.unshift(close), mxw_openArr.unshift(open)
+
+// === STRUCTURES & MÉTHODES MXWELLSUITE ===
+type mxw_rollingTF
+    float highTF                  = 0
+    float lowTF                   = 1e8
+    int   highTFt                 = 0
+    int   lowTFt                  = 0
+    float volTF                   = 0
+    map   <string, line >         rTFdraw
+    map   <string, label>         rTFlabel
+
+method mxw_tfDraw(mxw_rollingTF mxw_id, int mxw_tfDiff, bool mxw_showRollingLab, string mxw_tf, bool mxw_showLevels) => 
+    mxw_TFhrdata = mxw_rollingTF.new()
+    var mxw_volRolling = array.new<float>()
+    if mxw_highArr.size() > mxw_tfDiff
+        for i = 0 to mxw_tfDiff
+            if mxw_showLevels and barstate.islast
+                mxw_getHigh = mxw_highArr.get(i)
+                mxw_getLow = mxw_lowArr.get(i)
+                mxw_getTime = mxw_timeArr.get(i)
+                mxw_TFhrdata.highTF := math.max(mxw_TFhrdata.highTF, mxw_getHigh)
+                mxw_TFhrdata.lowTF  := math.min(mxw_TFhrdata.lowTF , mxw_getLow)
+                if mxw_TFhrdata.highTF == mxw_getHigh 
+                    mxw_TFhrdata.highTFt := mxw_timeArr.get(i)
+                if mxw_TFhrdata.lowTF == mxw_getLow
+                    mxw_TFhrdata.lowTFt  := mxw_timeArr.get(i)
+            mxw_TFhrdata.volTF += mxw_volArr.get(i)
+        mxw_volRolling.push(mxw_TFhrdata.volTF)
+        var mxw_lineDraw = mxw_rollingTF.new(rTFdraw = map.new<string, line>(), rTFlabel = map.new<string, label>())
+        if mxw_showLevels
+            switch mxw_lineDraw.rTFdraw.size() == 0
+                true =>  
+                    mxw_lineDraw.rTFdraw.put("High", line.new(mxw_TFhrdata.highTFt, mxw_TFhrdata.highTF, time, mxw_TFhrdata.highTF, xloc = xloc.bar_time, color = color.aqua))
+                    mxw_lineDraw.rTFdraw.put("Low" , line.new(mxw_TFhrdata.lowTFt , mxw_TFhrdata.lowTF , time, mxw_TFhrdata.lowTF , xloc = xloc.bar_time, color = color.aqua))
+                =>       
+                    mxw_lineDraw.rTFdraw.get("High").set_xy1(mxw_TFhrdata.highTFt, mxw_TFhrdata.highTF)
+                    mxw_lineDraw.rTFdraw.get("High").set_xy2(time, mxw_TFhrdata.highTF)
+                    mxw_lineDraw.rTFdraw.get("Low").set_xy1(mxw_TFhrdata.lowTFt, mxw_TFhrdata.lowTF)
+                    mxw_lineDraw.rTFdraw.get("Low").set_xy2(time, mxw_TFhrdata.lowTF)
+            if mxw_showRollingLab 
+                switch mxw_lineDraw.rTFlabel.size() == 0
+                    true =>  
+                        mxw_lineDraw.rTFlabel.put("High", label.new(time, mxw_TFhrdata.highTF, xloc = xloc.bar_time, textcolor = color.aqua, text = mxw_tf + "H", size = size.tiny, style = label.style_label_left, color = #00000000))
+                        mxw_lineDraw.rTFlabel.put("Low" , label.new(time, mxw_TFhrdata.lowTF , xloc = xloc.bar_time, textcolor = color.aqua, text = mxw_tf + "L", size = size.tiny, style = label.style_label_left, color = #00000000))
+                    =>  
+                        mxw_lineDraw.rTFlabel.get("High").set_xy(time, mxw_TFhrdata.highTF)
+                        mxw_lineDraw.rTFlabel.get("Low").set_xy(time, mxw_TFhrdata.lowTF)
+    [mxw_TFhrdata.volTF, mxw_volRolling]
+
+mxw_tfDrawLower(bool mxw_showRollingLab, simple string mxw_tf, bool mxw_showLevels) => 
+    simple int mxw_end = switch mxw_tf 
+        "240" => 240
+        "1D"  => 1440
+    [mxw_o, mxw_h, mxw_l, mxw_c, mxw_v, mxw_t] = request.security_lower_tf(syminfo.tickerid, "1", [open, high, low, close, volume, time])
+    var mxw_oArr = array.new_float()
+    var mxw_hArr = array.new_float()
+    var mxw_lArr = array.new_float()
+    var mxw_cArr = array.new_float()
+    var mxw_vArr = array.new_float()
+    var mxw_tArr = array.new_int()
+    mxw_TFhrdata = mxw_rollingTF.new()
+    var mxw_volRolling = array.new<float>()
+    if mxw_h.size() > 0
+        for i = 0 to mxw_h.size() - 1
+            mxw_oArr.push(mxw_o.get(i))
+            mxw_hArr.push(mxw_h.get(i))
+            mxw_lArr.push(mxw_l.get(i))
+            mxw_cArr.push(mxw_c.get(i))
+            mxw_vArr.push(mxw_v.get(i))
+            mxw_tArr.push(mxw_t.get(i))
+            if mxw_hArr.size() > mxw_end 
+                mxw_oArr.shift()
+                mxw_hArr.shift()
+                mxw_lArr.shift()
+                mxw_cArr.shift()
+                mxw_vArr.shift()
+                mxw_tArr.shift()
+        for i = 0 to mxw_hArr.size() - 1
+            if mxw_showLevels
+                mxw_getHigh = mxw_hArr.get(i)
+                mxw_getLow = mxw_lArr.get(i)
+                mxw_getTime = mxw_tArr.get(i)
+                mxw_TFhrdata.highTF := math.max(mxw_TFhrdata.highTF, mxw_getHigh)
+                mxw_TFhrdata.lowTF  := math.min(mxw_TFhrdata.lowTF , mxw_getLow)
+                if mxw_TFhrdata.highTF == mxw_getHigh 
+                    mxw_TFhrdata.highTFt := mxw_tArr.get(i)
+                if mxw_TFhrdata.lowTF == mxw_getLow
+                    mxw_TFhrdata.lowTFt  := mxw_tArr.get(i)
+            mxw_TFhrdata.volTF  += mxw_vArr.get(i)
+        mxw_volRolling.push(mxw_TFhrdata.volTF)
+        var mxw_lineDraw = mxw_rollingTF.new(rTFdraw = map.new<string, line>(), rTFlabel = map.new<string, label>())
+        if mxw_showLevels
+            switch mxw_lineDraw.rTFdraw.size() == 0
+                true =>  
+                    mxw_lineDraw.rTFdraw.put("High", line.new(mxw_TFhrdata.highTFt, mxw_TFhrdata.highTF, time, mxw_TFhrdata.highTF, xloc = xloc.bar_time, color = color.aqua))
+                    mxw_lineDraw.rTFdraw.put("Low" , line.new(mxw_TFhrdata.lowTFt , mxw_TFhrdata.lowTF , time, mxw_TFhrdata.lowTF , xloc = xloc.bar_time, color = color.aqua))
+                =>       
+                    mxw_lineDraw.rTFdraw.get("High").set_xy1(mxw_TFhrdata.highTFt, mxw_TFhrdata.highTF)
+                    mxw_lineDraw.rTFdraw.get("High").set_xy2(time, mxw_TFhrdata.highTF)
+                    mxw_lineDraw.rTFdraw.get("Low").set_xy1(mxw_TFhrdata.lowTFt, mxw_TFhrdata.lowTF)
+                    mxw_lineDraw.rTFdraw.get("Low").set_xy2(time, mxw_TFhrdata.lowTF)
+            if mxw_showRollingLab 
+                switch mxw_lineDraw.rTFlabel.size() == 0
+                    true =>  
+                        mxw_lineDraw.rTFlabel.put("High", label.new(time, mxw_TFhrdata.highTF, xloc = xloc.bar_time, textcolor = color.aqua, text = mxw_tf + "H", size = size.tiny, style = label.style_label_left, color = #00000000))
+                        mxw_lineDraw.rTFlabel.put("Low" , label.new(time, mxw_TFhrdata.lowTF , xloc = xloc.bar_time, textcolor = color.aqua, text = mxw_tf + "L", size = size.tiny, style = label.style_label_left, color = #00000000))
+                    =>       
+                        mxw_lineDraw.rTFlabel.get("High").set_xy(time, mxw_TFhrdata.highTF)
+                        mxw_lineDraw.rTFlabel.get("Low").set_xy(time, mxw_TFhrdata.lowTF)
+    [mxw_TFhrdata.volTF, mxw_volRolling]
+
+var mxw_r4hrbars = math.floor(timeframe.in_seconds("240") / timeframe.in_seconds(timeframe.period))
+var mxw_rDbars   = math.floor(timeframe.in_seconds("1D") / timeframe.in_seconds(timeframe.period))
+
+mxw_rollingTF_instance = mxw_rollingTF.new()
+[mxw_vol4hr, mxw_vol4hrArr] = switch 
+    timeframe.in_seconds() <= 60 => mxw_rollingTF_instance.mxw_tfDraw(mxw_r4hrbars, mxw_show4hLab, "240", mxw_show4H)
+    =>                              mxw_tfDrawLower(mxw_show4hLab, "240", mxw_show4H)
+[mxw_vol1D, mxw_vol1DArr] = switch
+    timeframe.in_seconds() <= 60 => mxw_rollingTF_instance.mxw_tfDraw(mxw_rDbars, mxw_show1DLab, "1D", mxw_show1D) 
+    =>                              mxw_tfDrawLower(mxw_show1DLab, "1D", mxw_show1D)
+
+// === FONCTIONS MXWELLSUITE ===
+mxw_calculatePivots(mxw_length)=>
+    var int mxw_intraCalc = 0
+    mxw_topSwing = 0.0
+    mxw_botSwing = 0.0
+    if bar_index > mxw_length + 1
+        mxw_up  = mxw_highArr.slice(0, mxw_length).max()
+        mxw_dn  = mxw_lowArr.slice(0, mxw_length).min() 
+        mxw_cHi = mxw_highArr.get(mxw_length)
+        mxw_cLo = mxw_lowArr.get(mxw_length)
+        mxw_intraCalc := switch 
+            mxw_cHi > mxw_up => 0 
+            mxw_cLo < mxw_dn => 1 
+            =>          mxw_intraCalc[1]
+        mxw_topSwing := switch 
+            mxw_intraCalc == 0 and mxw_intraCalc[1] != 0 => mxw_cHi 
+            =>                                      0.0 
+        mxw_botSwing := switch 
+            mxw_intraCalc == 1 and mxw_intraCalc[1] != 1 => mxw_cLo
+            =>                                      0.0
+    [mxw_topSwing, mxw_botSwing]
+
+[mxw_bigUpper, mxw_bigLower]     = mxw_calculatePivots(mxw_extSens)
+[mxw_smallUpper, mxw_smallLower] = mxw_calculatePivots(mxw_intSens)
+
+var label [] mxw_upLabel = array.new_label(1)
+var label [] mxw_dnLabel = array.new_label(1)
+var box [] mxw_highBlock = array.new_box()
+var box [] mxw_lowBlock  = array.new_box()
+
+mxw_drawChar(mxw_x, mxw_y, mxw_str, mxw_col, mxw_down) =>
+    mxw_style = switch mxw_down 
+        true => label.style_label_down
+        =>      label.style_label_up
+    line.new (int(mxw_x), mxw_y, bar_index, mxw_y, color = mxw_col, style = line.style_dashed)
+    label.new(math.round(math.avg(mxw_x, bar_index)), mxw_y, mxw_str, color = #00000000, textcolor = mxw_col, style = mxw_style, size = size.small)
+
+
+// --- CORRECTION 1: Modification de la fonction mxw_drawStructureExt ---
+mxw_drawStructureExt() => 
+    var int mxw_counter = 0
+    // Déclarer les booléens en tant que variables LOCALES
+    bool _isBullishBOS = false
+    bool _isBearishBOS = false
+    bool _isBullishCHoCH = false
+    bool _isBearishCHoCH = false
+    
+    if mxw_bigUpper != 0
+        mxw_bigData.put("upside", 1)
+        mxw_x1 = bar_index - mxw_extSens
+        mxw_txt = switch mxw_bigUpper > mxw_bigData.get("upaxis")
+            true => 'HH'
+            =>      'LH'
+        if mxw_showHHLH
+            mxw_upLabel.set(0, label.new(mxw_x1, mxw_bigUpper, mxw_txt, color = color.new(color.white, 100), textcolor = mxw_bearC, style = label.style_label_down, size = size.small))
+        if mxw_showOB
+            mxw_highBlock.push(box.new(mxw_x1, mxw_bigUpper, last_bar_index + 5, mxw_bigUpper * .998, border_color = color.new(color.red, 75), bgcolor = color.new(color.red, 95)))
+        mxw_bigData.put("upaxis" , mxw_bigUpper)
+        mxw_bigData.put("upaxis2", mxw_x1)
+        mxw_counter := 1
+
+    if mxw_bigLower != 0
+        mxw_bigData.put("downside", 1)
+        mxw_x1 = bar_index - mxw_extSens
+        mxw_txt = switch mxw_bigLower < mxw_bigData.get("dnaxis") 
+            true => "LL" 
+            =>      "HL"
+        if mxw_showHLLL == true 
+            mxw_dnLabel.set(0, label.new(mxw_x1, mxw_bigLower, mxw_txt, color = #ffffff00, textcolor = mxw_bullC, style = label.style_label_up, size = size.small))
+        if mxw_showOB
+            mxw_lowBlock.push(box.new(mxw_x1, mxw_bigLower, last_bar_index + 5, mxw_bigLower * 1.002, border_color = color.new(color.blue, 75), bgcolor = color.new(color.blue, 95)))    
+        mxw_bigData.put("dnaxis" , mxw_bigLower)
+        mxw_bigData.put("dnaxis2", mxw_x1)
+        mxw_counter := -1
+
+    if mxw_showExt
+        if ta.crossover(close, mxw_bigData.get("upaxis"))
+            if mxw_bigData.get("upside") != 0
+                mxw_str = switch mxw_bigData.get("moving") < 0
+                    true => mxw_extStru != "BoS"   ? 'CHoCH' : "" 
+                    =>      mxw_extStru != 'CHoCH' ? 'BoS'   : ""
+                // --- CORRECTION 2.1: Correction de 'contains' ---
+                if mxw_extStru == "All" or str.contains(mxw_str, mxw_extStru)
+                    mxw_drawChar(mxw_bigData.get("upaxis2"), mxw_bigData.get("upaxis"), mxw_str, mxw_bullC, true)
+                // Logique de stratégie
+                if mxw_str == 'BoS'
+                    _isBullishBOS := true // Assigner à la variable locale
+                if mxw_str == 'CHoCH'
+                    _isBullishCHoCH := true // Assigner à la variable locale
+                    
+                mxw_bigData.put("upside", 0)
+                mxw_bigData.put("moving", 1)
+
+        if ta.crossunder(close, mxw_bigData.get("dnaxis"))
+            if mxw_bigData.get("downside") != 0
+                mxw_str = switch mxw_bigData.get("moving") > 0
+                    true => mxw_extStru != "BoS"   ? 'CHoCH' : "" 
+                    =>      mxw_extStru != 'CHoCH' ? 'BoS'   : ""
+                // --- CORRECTION 2.2: Correction de 'contains' ---
+                if mxw_extStru == "All" or str.contains(mxw_str, mxw_extStru)
+                    mxw_drawChar(mxw_bigData.get("dnaxis2"), mxw_bigData.get("dnaxis"), mxw_str, mxw_bearC, false)
+                // Logique de stratégie
+                if mxw_str == 'BoS'
+                    _isBearishBOS := true // Assigner à la variable locale
+                if mxw_str == 'CHoCH'
+                    _isBearishCHoCH := true // Assigner à la variable locale
+
+                mxw_bigData.put("downside", 0)
+                mxw_bigData.put("moving", -1)
+    
+    // Retourner les nouvelles valeurs
+    [mxw_counter, _isBullishBOS, _isBearishBOS, _isBullishCHoCH, _isBearishCHoCH] 
+
+// --- CORRECTION 1 (suite): Mettre à jour l'appel global ---
+[mxw_counter, mxw_isBullishBOS, mxw_isBearishBOS, mxw_isBullishCHoCH, mxw_isBearishCHoCH] = mxw_drawStructureExt()
+
+
+method mxw_updateBox(array<box> mxw_id) =>
+    if mxw_id.size() > 0 
+        for i = 0 to mxw_id.size() - 1
+            mxw_id.get(i).set_right(last_bar_index + 5)
+
+method mxw_cleanseLevel(array<box> mxw_id, bool mxw_isHighBlock) => 
+    if mxw_id.size() > 0   
+        for i = mxw_id.size() - 1 to 0 
+            mxw_condition = switch mxw_isHighBlock
+                true => close >= mxw_id.get(i).get_top()
+                =>      close <= mxw_id.get(i).get_bottom()
+            if mxw_condition
+                mxw_id.remove(i).delete()
+        if mxw_id.size() > mxw_showLast and mxw_showLast != 0
+            for i = mxw_id.size() - mxw_showLast to 0 
+                mxw_id.remove(i).delete()
+
+mxw_highBlock.mxw_cleanseLevel(true)
+mxw_lowBlock.mxw_cleanseLevel(false)
+
+if barstate.islast
+    mxw_highBlock.mxw_updateBox()
+    mxw_lowBlock.mxw_updateBox()
+
+method mxw_updateMain(line mxw_id) => 
+    mxw_hi = 0.0 
+    mxw_lo = 1e8
+    if mxw_showFibs
+        [mxw_bigUpperFibs, mxw_bigLowerFibs] = mxw_calculatePivots(25)
+        var int mxw_counterFibs = 0
+        if mxw_bigUpperFibs != 0 
+            mxw_counterFibs := 1
+        if mxw_bigLowerFibs != 0 
+            mxw_counterFibs := -1
+        if mxw_counterFibs == 1 
+            mxw_hi := 0.0
+            mxw_id.set_xy1(int(mxw_bigData.get("upaxis2")), mxw_bigData.get("upaxis"))
+            for i = 0 to bar_index - int(mxw_bigData.get("dnaxis2"))
+                mxw_getLow = mxw_lowArr.get(i)
+                mxw_lo := math.min(mxw_getLow, mxw_lo)
+                if mxw_lo == mxw_getLow
+                    mxw_id.set_xy2(bar_index - i, mxw_lo)
+        else if mxw_counterFibs == -1
+            mxw_lo := 1e8
+            mxw_id.set_xy1(int(mxw_bigData.get("dnaxis2")), mxw_bigData.get("dnaxis"))
+            for i = 0 to bar_index - int(mxw_bigData.get("upaxis2"))
+                mxw_getHigh = mxw_highArr.get(i)
+                mxw_hi     := math.max(mxw_highArr.get(i), mxw_hi)
+                if mxw_hi == mxw_getHigh 
+                    mxw_id.set_xy2(bar_index - i, mxw_hi)
+        if mxw_id.get_x2() < mxw_id.get_x1()
+            mxw_x2 = mxw_id.get_x2(), mxw_x1 = mxw_id.get_x1()
+            mxw_y2 = mxw_id.get_y2(), mxw_y1 = mxw_id.get_y1(),
+            mxw_id.set_xy2(mxw_x1, mxw_y1)
+            mxw_id.set_xy1(mxw_x2, mxw_y2)
+        switch mxw_id.get_y2() < mxw_id.get_y1()
+            true => mxw_id.set_color(#F24968)
+            =>      mxw_id.set_color(#14D990)
+    0
+
+// Initialisation des labels (nécessaire pour .first())
+if barstate.isfirst
+    mxw_upLabel.set(0, label.new(bar_index, high, "HH", color = #00000000, textcolor = #00000000, style = label.style_label_down))
+    mxw_dnLabel.set(0, label.new(bar_index, low, "LL", color = #00000000, textcolor = #00000000, style = label.style_label_up))
+    
+var mxw_main = line.new(mxw_dnLabel.first().get_x(), mxw_dnLabel.first().get_y(), mxw_upLabel.first().get_x(), mxw_upLabel.first().get_y(), style = line.style_dashed, width = 2)
+
+// --- CORRECTION 4: Appel de mxw_updateMain en dehors du 'if' ---
+mxw_main.mxw_updateMain()
+
+mxw_quickLine(mxw_getX2, mxw_y, mxw_color) => 
+    line.new(mxw_getX2, mxw_y, bar_index + 5, mxw_y, color = color.new(mxw_color, 75))
+
+mxw_quickLabel(mxw_y, mxw_txt, mxw_color) => 
+    label.new(bar_index + 5, mxw_y, text = str.tostring(mxw_txt), color = #00000000, style = label.style_label_left, textcolor = mxw_color)
+
+mxw_drawFibs() => 
+    if barstate.islast
+        var mxw_fibLine = array.new<line>(5)
+        var mxw_fibLab = array.new<label>(5) 
+        if mxw_fibLine.size() > 0 
+            for i = 0 to mxw_fibLine.size() - 1
+                mxw_fibLine.get(i).delete()
+                mxw_fibLab.get(i).delete()
+        if mxw_showFibs
+            mxw_getY2 = mxw_main.get_y2()
+            mxw_sub   = mxw_main.get_y1() - mxw_getY2
+            mxw_getX1 = mxw_main.get_x1()
+            mxw_getX2 = mxw_main.get_x2()
+            for i = 0 to mxw_fibLine.size() - 1
+                mxw_mod = i // % mxw_fibLine.size() - 1   (Correction: l'original avait un bug ici)
+                [mxw_y, mxw_col, mxw_txt] = switch mxw_mod
+                    0 => [mxw_sub * mxw_fib1 + mxw_getY2, mxw_show236 ? mxw_fib1col : color.new(chart.bg_color, 100), mxw_fib1]
+                    1 => [mxw_sub * mxw_fib2 + mxw_getY2, mxw_show382 ? mxw_fib2col : color.new(chart.bg_color, 100), mxw_fib2]
+                    2 => [mxw_sub * mxw_fib3 + mxw_getY2, mxw_show5   ? mxw_fib3col : color.new(chart.bg_color, 100), mxw_fib3]
+                    3 => [mxw_sub * mxw_fib4 + mxw_getY2, mxw_show618 ? mxw_fib4col : color.new(chart.bg_color, 100), mxw_fib4]
+                    =>   [mxw_sub * mxw_fib5 + mxw_getY2, mxw_show786 ? mxw_fib5col : color.new(chart.bg_color, 100), mxw_fib5] 
+                mxw_fibLine.set(i, mxw_quickLine  (mxw_getX2, mxw_y, mxw_col))
+                mxw_fibLab.set(i, mxw_quickLabel (mxw_y, mxw_txt, mxw_col))
+
+mxw_drawFibs()
+
+mxw_drawStructureInternals() => 
+    if mxw_showInt
+        var mxw_keyValues = map.new<string, float>()
+        if mxw_keyValues.size() == 0 
+            mxw_keyValues.put("movingSmall", 0)
+            mxw_keyValues.put("upsideSmall", 1) // Initialisation
+            mxw_keyValues.put("downsideSmall", 1) // Initialisation
+            mxw_keyValues.put("upaxisSmall", high) // Initialisation
+            mxw_keyValues.put("dnaxisSmall", low) // Initialisation
+            mxw_keyValues.put("upaxis2Small", bar_index) // Initialisation
+            mxw_keyValues.put("dnaxis2Small", bar_index) // Initialisation
+            
+        if mxw_smallUpper != 0 
+            mxw_keyValues.put("upsideSmall", 1)          
+            mxw_keyValues.put("upaxisSmall", mxw_smallUpper) 
+            mxw_keyValues.put("upaxis2Small", bar_index - mxw_intSens)
+        if mxw_smallLower != 0 
+            mxw_keyValues.put("downsideSmall", 1)       
+            mxw_keyValues.put("dnaxisSmall", mxw_smallLower)
+            mxw_keyValues.put("dnaxis2Small", bar_index - mxw_intSens)
+
+        if ta.crossover(close, mxw_keyValues.get("upaxisSmall")) 
+            if mxw_keyValues.get("upsideSmall") != 0
+                mxw_str = switch 
+                    mxw_keyValues.get("movingSmall") < 0 =>     mxw_intStru != "BoS"   ? 'I-CHoCH' : "" 
+                    =>                                      mxw_intStru != "CHoCH" ? 'I-BoS'   : ""
+                // --- CORRECTION 2.3: Correction de 'contains' ---
+                if mxw_intStru == "All" or str.contains(mxw_str, mxw_intStru)
+                    mxw_drawChar(mxw_keyValues.get("upaxis2Small"), mxw_keyValues.get("upaxisSmall"), mxw_str, mxw_bullC, true)
+                mxw_keyValues.put("upsideSmall", 0)
+                mxw_keyValues.put("movingSmall", 1)
+        if ta.crossunder(close, mxw_keyValues.get("dnaxisSmall"))
+            if mxw_keyValues.get("downsideSmall") != 0
+                mxw_str = switch 
+                    mxw_keyValues.get("movingSmall") > 0 => mxw_intStru != "BoS"   ? 'I-CHoCH' : ""
+                    =>                                  mxw_intStru != "CHoCH" ? 'I-BoS'   : ""
+                // --- CORRECTION 2.4: Correction de 'contains' ---
+                if mxw_intStru == "All" or str.contains(mxw_str, mxw_intStru)
+                    mxw_drawChar(mxw_keyValues.get("dnaxis2Small"), mxw_keyValues.get("dnaxisSmall"), mxw_str, mxw_bearC, false)
+                mxw_keyValues.put("downsideSmall", 0)
+                mxw_keyValues.put("movingSmall", -1)
+
+mxw_drawStructureInternals()
+
+mxw_drawAOE() => 
+    mxw_atr = ta.atr(14)
+    if mxw_showAOE 
+        if mxw_closeArr.size() > 50
+            mxw_aoi    = mxw_closeArr.slice(0, 50) 
+            mxw_aoi2   = mxw_openArr.slice(0, 50) 
+            mxw_maxaoiH = math.max(mxw_aoi.max(), mxw_aoi2.max())
+            mxw_minaoiL = math.min(mxw_aoi.min(), mxw_aoi2.min())
+            var mxw_aoeLevels = map.new<string, box>()
+            if mxw_aoeLevels.size() == 0 
+                mxw_aoeLevels.put("High", box.new(bar_index[50], mxw_maxaoiH * 1.01, bar_index + 5, mxw_maxaoiH, border_color = #00000000, bgcolor = color.new(#F24968, 90), text = "Area of Interest" , text_size = size.small, text_color = color.new(#F24968, 33)))
+                mxw_aoeLevels.put("Low", box.new(bar_index[50], mxw_minaoiL, bar_index + 5, mxw_minaoiL * .99, border_color = #00000000, bgcolor = color.new(#14D990, 90), text = "Area of Interest" , text_size = size.small, text_color = color.new(#14D990, 33)))
+            
+            mxw_getHighBox = mxw_aoeLevels.get("High")
+            if close <= mxw_getHighBox.get_top() * 1.01
+                mxw_getHighBox.set_lefttop      (bar_index[50], mxw_maxaoiH + mxw_atr)
+                mxw_getHighBox.set_rightbottom  (bar_index + 5,  mxw_maxaoiH)
+                mxw_getHighBox.set_text         ("Area of Interest")
+            else 
+                mxw_getHighBox.set_lefttop      (bar_index + 5, mxw_maxaoiH + mxw_atr)
+                mxw_getHighBox.set_rightbottom  (bar_index + 5,  mxw_maxaoiH + mxw_atr)
+                mxw_getHighBox.set_text         ("")
+            mxw_getLowBox = mxw_aoeLevels.get("Low")
+            if close >= mxw_getLowBox.get_bottom() * .99
+                mxw_getLowBox.set_lefttop     (bar_index[50],  mxw_minaoiL)
+                mxw_getLowBox.set_rightbottom (bar_index + 5,  mxw_minaoiL - mxw_atr)
+                mxw_getLowBox.set_text        ("Area of Interest")
+            else 
+                mxw_getLowBox.set_lefttop     (bar_index + 5, mxw_minaoiL)
+                mxw_getLowBox.set_rightbottom (bar_index + 5, - mxw_atr)
+                mxw_getLowBox.set_text        ("")
+
+mxw_drawAOE()
+
+var mxw_tab2 = table.new(position.top_right, 13, 13,  bgcolor = #20222C, border_color = #363843, frame_color = #363843, border_width = 1, frame_width = 1)
+mxw_nyHour   = hour(timenow, "America/New_York")
+mxw_nyMinute = minute(timenow, "America/New_York")
+
+// === LOGIQUE FVG MXWELLSUITE ===
+mxw_fvg(mxw_direction) => 
+    var mxw_fvgMat = matrix.new<float>(5)
+    var mxw_fvgDrawings = array.new<box>()
+    mxw_fvgMat.add_col(0, array.from(math.sign(close - open), close, high, low, time))
+    if mxw_fvgMat.columns() > 3 
+        mxw_fvgMat.remove_col(mxw_fvgMat.columns() - 1)
+    if mxw_fvgMat.row(0).sum() == mxw_direction
+        mxw_getDir = math.sign(mxw_direction)
+        [mxw_y, mxw_y1] = switch mxw_getDir
+            -1 => [mxw_fvgMat.get(3, 2), mxw_fvgMat.get(2, 0)]   
+            =>    [mxw_fvgMat.get(3, 0), mxw_fvgMat.get(2, 2)]
+        mxw_col = switch mxw_closeOnly
+            true => #00000000
+            =>      color.new(mxw_fvgcol, mxw_fvgtra)
+        mxw_fvgDrawings.push(box.new(int(mxw_fvgMat.get(4, 1)), mxw_y, last_bar_time, mxw_y1, xloc = xloc.bar_time, border_color = mxw_col, bgcolor = mxw_col))
+    mxw_fvgDrawings
+
+var mxw_fvgDn = array.new<box>()
+var mxw_fvgUp = array.new<box>()
+
+if mxw_showFVG
+    mxw_fvgDn_new = mxw_fvg(-3)
+    mxw_fvgUp_new = mxw_fvg(3)
+    // Ajout des nouvelles boîtes aux arrays persistants
+    if mxw_fvgDn_new.size() > 0
+        for i = 0 to mxw_fvgDn_new.size() - 1
+            mxw_fvgDn.push(mxw_fvgDn_new.get(i))
+    if mxw_fvgUp_new.size() > 0
+        for i = 0 to mxw_fvgUp_new.size() - 1
+            mxw_fvgUp.push(mxw_fvgUp_new.get(i))
+
+    // Logique de mitigation et de contrat
+    if mxw_fvgDn.size() > 0 
+        for i = mxw_fvgDn.size() - 1 to 0
+            mxw_getfvg = mxw_fvgDn.get(i)
+            if high >= mxw_getfvg.get_top()
+                mxw_getfvg.delete()
+                mxw_fvgDn.remove(i)
+            else if mxw_contract
+                if high > mxw_getfvg.get_bottom()
+                    mxw_getfvg.set_bottom(high)
+    if mxw_fvgUp.size() > 0 
+        for i = mxw_fvgUp.size() - 1 to 0
+            mxw_getfvg = mxw_fvgUp.get(i)
+            if low <= mxw_getfvg.get_bottom()
+                mxw_getfvg.delete()
+                mxw_fvgUp.remove(i)
+            else if mxw_contract
+                if low < mxw_getfvg.get_top()
+                    mxw_getfvg.set_top(low)
+
+    // Logique 'CloseOnly'
+    if mxw_closeOnly and barstate.islast 
+        mxw_minDist = matrix.new<float>(1, 2, 20e20)
+        if mxw_fvgDn.size() > 0 
+            for i = mxw_fvgDn.size() - 1 to 0
+                mxw_getBottom = mxw_fvgDn.get(i).get_bottom()
+                mxw_minDist.set(0, 1, math.min(mxw_minDist.get(0, 1), math.abs(close - mxw_getBottom)))
+                if math.abs(close - mxw_getBottom) == mxw_minDist.get(0, 1)
+                    mxw_minDist.set(0, 0, i)
+                mxw_fvgDn.get(i).set_right(mxw_fvgDn.get(i).get_left())
+            if mxw_fvgDn.size() > 0 // Vérifier si l'array n'est pas vide
+                mxw_fvgDn.get(int(mxw_minDist.get(0, 0))).set_bgcolor(color.new(mxw_fvgcol, mxw_fvgtra))
+                mxw_fvgDn.get(int(mxw_minDist.get(0, 0))).set_border_color(color.new(mxw_fvgcol, mxw_fvgtra))
+                mxw_fvgDn.get(int(mxw_minDist.get(0, 0))).set_right(last_bar_time)
+        
+        mxw_minDist.set(0, 0, 0)
+        mxw_minDist.set(0, 1, 20e20)
+        
+        if mxw_fvgUp.size() > 0 
+            for i = mxw_fvgUp.size() - 1 to 0
+                mxw_getTop = mxw_fvgUp.get(i).get_top()
+                mxw_minDist.set(0, 1, math.min(mxw_minDist.get(0, 1), math.abs(close - mxw_getTop)))
+                if math.abs(close - mxw_getTop) == mxw_minDist.get(0, 1)
+                    mxw_minDist.set(0, 0, i)
+                mxw_fvgUp.get(i).set_right(mxw_fvgUp.get(i).get_left())
+            if mxw_fvgUp.size() > 0 // Vérifier si l'array n'est pas vide
+                mxw_fvgUp.get(int(mxw_minDist.get(0, 0))).set_bgcolor(color.new(mxw_fvgcol, mxw_fvgtra))
+                mxw_fvgUp.get(int(mxw_minDist.get(0, 0))).set_border_color(color.new(mxw_fvgcol, mxw_fvgtra))
+                mxw_fvgUp.get(int(mxw_minDist.get(0, 0))).set_right(last_bar_time)
+
+// === TABLEAU & SESSIONS MXWELLSUITE ===
+mxw_calculateTimeDifference(mxw_timestamp1, mxw_timestamp2) =>
+    mxw_timeDifference = mxw_timestamp2 - mxw_timestamp1
+    mxw_hours = math.floor(mxw_timeDifference / 3600000)
+    mxw_minutes = math.floor((mxw_timeDifference % 3600000) / 60000)
+    [mxw_hours, mxw_minutes]
+
+mxw_dayAdjustment = (hour(timenow, "America/New_York") < 2) ? dayofmonth(timenow) + 1 : dayofmonth(timenow)
+mxw_dayAdjustment2 = mxw_nyHour >= 20 or mxw_nyHour < 2 ? dayofmonth(timenow) + 1 : dayofmonth(timenow)
+
+mxw_timeIsInRange(mxw_startHour, mxw_startMinute, mxw_endHour, mxw_endMinute) =>
+    (mxw_nyHour > mxw_startHour or (mxw_nyHour == mxw_startHour and mxw_nyMinute >= mxw_startMinute)) and (mxw_nyHour < mxw_endHour or (mxw_nyHour == mxw_endHour and mxw_nyMinute <= mxw_endMinute))
+
+[mxw_chartcol, mxw_timetilchange, mxw_stringCol, mxw_stringCol2] = switch 
+    mxw_timeIsInRange(9, 30, 16, 0) => [#f24968  , timestamp("America/New_York", year(timenow), month(timenow), dayofmonth(timenow), 16, 0, 0), "New York", "Asia"]
+    mxw_timeIsInRange(20, 0, 2 , 0) => [#14D990  , timestamp("America/New_York", year(timenow), month(timenow), mxw_dayAdjustment, 2, 0, 0), "Asia", "London"]
+    mxw_timeIsInRange(3, 0, 11, 30) => [#F2B807  , timestamp("America/New_York", year(timenow), month(timenow), dayofmonth(timenow), 11, 30, 0), "London", "New York"]
+    => [color.gray, int(na), "Dead Zone", (mxw_nyHour > 16 or mxw_nyHour < 3) ? "London" : (mxw_nyHour >= 11 and mxw_nyHour < 20) ? "Asia" : "New York"]                        
+
+[mxw_hours, mxw_minutes] = mxw_calculateTimeDifference(timenow, mxw_timetilchange)
+mxw_timetilchange2 = switch
+    mxw_timeIsInRange(9, 30, 16, 0)  => timestamp("America/New_York", year(timenow), month(timenow), dayofmonth(timenow), 20, 0, 0) 
+    mxw_timeIsInRange(20, 0, 2 , 0)  => timestamp("America/New_York", year(timenow), month(timenow), dayofmonth(timenow), 3, 0, 0)  
+    mxw_timeIsInRange(3, 0, 11, 30)  => timestamp("America/New_York", year(timenow), month(timenow), dayofmonth(timenow), 9, 30, 0) 
+    => na 
+
+if na(mxw_timetilchange2)
+    mxw_timetilchange2 := switch
+        mxw_nyHour < 9 or (mxw_nyHour == 9 and mxw_nyMinute < 30) => timestamp("America/New_York", year(timenow), month(timenow), dayofmonth(timenow), 9, 30, 0) 
+        mxw_nyHour < 20 or (mxw_nyHour >= 16 and mxw_nyHour < 20) => timestamp("America/New_York", year(timenow), month(timenow), dayofmonth(timenow), 20, 0, 0) 
+        mxw_nyHour < 3 or (mxw_nyHour >= 2 and mxw_nyHour < 3)    => timestamp("America/New_York", year(timenow), month(timenow), dayofmonth(timenow), 3, 0, 0)     
+        => na  
+
+[mxw_hours2, mxw_minutes2] = mxw_calculateTimeDifference(timenow, mxw_timetilchange2)
+
+method mxw_getActivity(array<float> mxw_id, float mxw_id2) => 
+    mxw_activity = ""
+    if mxw_id.size() > 0
+        mxw_volPerc1 = mxw_id.percentile_nearest_rank(10)
+        mxw_volPerc2 = mxw_id.percentile_nearest_rank(33)
+        mxw_volPerc3 = mxw_id.percentile_nearest_rank(50)
+        mxw_volPerc4 = mxw_id.percentile_nearest_rank(66)
+        mxw_volPerc5 = mxw_id.percentile_nearest_rank(90)
+        // log.warning(str.tostring(mxw_volPerc1) + "\n" + str.tostring(mxw_volPerc2) + "\n" + str.tostring(mxw_volPerc3) + "\n" + str.tostring(mxw_volPerc4) + "\n" + str.tostring(mxw_volPerc5))
+        mxw_activity := switch 
+            mxw_id2 <=  mxw_volPerc1 => "Very Low"   
+            mxw_id2 <=  mxw_volPerc2 => "Low"   
+            mxw_id2 <=  mxw_volPerc3 => "Average"   
+            mxw_id2 <=  mxw_volPerc4 => "High"   
+            => "Very High"
+    mxw_activity
+    
+if barstate.islast 
+    mxw_hr4Act = mxw_vol4hrArr.mxw_getActivity(mxw_vol4hr)
+    mxw_D1Act  = mxw_vol1DArr.mxw_getActivity(mxw_vol1D)
+    
+    // Remplissage du tableau
+    table.cell(mxw_tab2, 0, 2, text = "Session:"  ,       text_color = color.white, text_halign = text.align_left)
+    table.cell(mxw_tab2, 0, 3, text = "Session Close:"  , text_color = color.white, text_halign = text.align_left)
+    table.cell(mxw_tab2, 0, 4, text = "Next Session:"  , text_color = color.white, text_halign = text.align_left)
+    table.cell(mxw_tab2, 0, 5, text = "Next Session Open:"  , text_color = color.white, text_halign = text.align_left)
+    table.cell(mxw_tab2, 0, 6, text = "4-Hr Volume:"  ,   text_color = color.white, text_halign = text.align_left)
+    table.cell(mxw_tab2, 0, 7, text = "24-Hr Volume:"  ,  text_color = color.white, text_halign = text.align_left)
+    
+    table.cell(mxw_tab2, 1, 2, text =  mxw_stringCol , text_color = color.white)
+    table.cell(mxw_tab2, 1, 3, text = mxw_stringCol != "Dead Zone" ? str.tostring(mxw_hours)+ "h" + str.tostring(mxw_minutes) + "m": "Dead Zone", text_color = color.white)
+    table.cell(mxw_tab2, 1, 4, text = mxw_stringCol2, text_color = color.white)
+    table.cell(mxw_tab2, 1, 5, text = str.tostring(mxw_hours2) + "h:" + str.tostring(mxw_minutes2) + "m", text_color = color.white)
+    table.cell(mxw_tab2, 1, 6, text = mxw_hr4Act, text_color = color.white)
+    table.cell(mxw_tab2, 1, 7, text = mxw_D1Act, text_color = color.white)
+
+// === BGCOLOR SESSIONS MXWELLSUITE ===
+mxw_nyHour2   = hour(time, "America/New_York")
+mxw_nyMinute2 = minute(time, "America/New_York")
+
+mxw_timeIsInRange2(mxw_startHour, mxw_startMinute, mxw_endHour, mxw_endMinute) =>
+    if mxw_endHour >= mxw_startHour
+        (mxw_nyHour2 > mxw_startHour or (mxw_nyHour2 == mxw_startHour and mxw_nyMinute2 >= mxw_startMinute)) and (mxw_nyHour2 < mxw_endHour or (mxw_nyHour2 == mxw_endHour and mxw_nyMinute2 <= mxw_endMinute))
+    else
+        (mxw_nyHour2 > mxw_startHour or (mxw_nyHour2 == mxw_startHour and mxw_nyMinute2 >= mxw_startMinute)) or (mxw_nyHour2 < mxw_endHour or (mxw_nyHour2 == mxw_endHour and mxw_nyMinute2 <= mxw_endMinute))
+
+string mxw_session_group = "MxwellSuite: Session Colors"
+color mxw_nyCol = input.color(defval = #f24968, title = "NY Color", group = mxw_session_group)
+color mxw_asCol = input.color(defval = #14D990, title = "Asia Color", group = mxw_session_group)
+color mxw_loCol = input.color(defval = #F2B807, title = "London Color", group = mxw_session_group)
+int mxw_tra   = input.int(defval = 98, minval = 0, maxval = 100, title = "Transparency", group = mxw_session_group)
+
+bgcolor(mxw_timeIsInRange2(9, 30, 16, 0) ? color.new(mxw_nyCol, mxw_tra) : na)
+bgcolor(mxw_timeIsInRange2(20, 0, 2 , 0) ? color.new(mxw_asCol, mxw_tra) : na)
+bgcolor(mxw_timeIsInRange2(3, 0, 11, 30) ? color.new(mxw_loCol, mxw_tra) : na)
+
+
+// =============================================================================
+// 3. CODE SOURCE VUMANCHU (Namespacé 'vum_' & converti v5) (Requirement 3)
+// =============================================================================
+
+// === INPUTS VUMANCHU ===
+string vum_wt_group = "Vumanchu: WaveTrend Settings"
+bool vum_wtShow = input.bool(true, title = 'Show WaveTrend', group = vum_wt_group)
+bool vum_wtBuyShow = input.bool(true, title = 'Show Buy dots', group = vum_wt_group)
+bool vum_wtGoldShow = input.bool(true, title = 'Show Gold dots', group = vum_wt_group)
+bool vum_wtSellShow = input.bool(true, title = 'Show Sell dots', group = vum_wt_group)
+bool vum_wtDivShow = input.bool(true, title = 'Show Div. dots', group = vum_wt_group)
+bool vum_vwapShow = input.bool(true, title = 'Show Fast WT', group = vum_wt_group)
+int vum_wtChannelLen = input.int(9, title = 'WT Channel Length', group = vum_wt_group)
+int vum_wtAverageLen = input.int(12, title = 'WT Average Length', group = vum_wt_group)
+vum_wtMASource = input.source(hlc3, title = 'WT MA Source', group = vum_wt_group)
+int vum_wtMALen = input.int(3, title = 'WT MA Length', group = vum_wt_group)
+int vum_obLevel = input.int(53, title = 'WT Overbought Level 1', group = vum_wt_group)
+int vum_obLevel2 = input.int(60, title = 'WT Overbought Level 2', group = vum_wt_group)
+int vum_obLevel3 = input.int(100, title = 'WT Overbought Level 3', group = vum_wt_group)
+int vum_osLevel = input.int(-53, title = 'WT Oversold Level 1', group = vum_wt_group)
+int vum_osLevel2 = input.int(-60, title = 'WT Oversold Level 2', group = vum_wt_group)
+int vum_osLevel3 = input.int(-75, title = 'WT Oversold Level 3', group = vum_wt_group)
+bool vum_wtShowDiv = input.bool(true, title = 'Show WT Regular Divergences', group = vum_wt_group)
+bool vum_wtShowHiddenDiv = input.bool(false, title = 'Show WT Hidden Divergences', group = vum_wt_group)
+bool vum_showHiddenDiv_nl = input.bool(true, title = 'Not apply OB/OS Limits on Hidden Divergences', group = vum_wt_group)
+int vum_wtDivOBLevel = input.int(45, title = 'WT Bearish Divergence min', group = vum_wt_group)
+int vum_wtDivOSLevel = input.int(-65, title = 'WT Bullish Divergence min', group = vum_wt_group)
+bool vum_wtDivOBLevel_addshow = input.bool(true, title = 'Show 2nd WT Regular Divergences', group = vum_wt_group)
+int vum_wtDivOBLevel_add = input.int(15, title = 'WT 2nd Bearish Divergence', group = vum_wt_group)
+int vum_wtDivOSLevel_add = input.int(-40, title = 'WT 2nd Bullish Divergence 15 min', group = vum_wt_group)
+
+string vum_mfi_group = "Vumanchu: MFI Settings"
+bool vum_rsiMFIShow = input.bool(true, title = 'Show MFI', group = vum_mfi_group)
+int vum_rsiMFIperiod = input.int(60,title = 'MFI Period', group = vum_mfi_group)
+float vum_rsiMFIMultiplier = input.float(150, title = 'MFI Area multiplier', group = vum_mfi_group)
+float vum_rsiMFIPosY = input.float(2.5, title = 'MFI Area Y Pos', group = vum_mfi_group)
+
+string vum_rsi_group = "Vumanchu: RSI Settings"
+bool vum_rsiShow = input.bool(true, title = 'Show RSI', group = vum_rsi_group)
+vum_rsiSRC = input.source(close, title = 'RSI Source', group = vum_rsi_group)
+int vum_rsiLen = input.int(14, title = 'RSI Length', group = vum_rsi_group)
+int vum_rsiOversold = input.int(30, title = 'RSI Oversold', minval = 50, maxval = 100, group = vum_rsi_group)
+int vum_rsiOverbought = input.int(60, title = 'RSI Overbought', minval = 0, maxval = 50, group = vum_rsi_group)
+bool vum_rsiShowDiv = input.bool(false, title = 'Show RSI Regular Divergences', group = vum_rsi_group)
+bool vum_rsiShowHiddenDiv = input.bool(false, title = 'Show RSI Hidden Divergences', group = vum_rsi_group)
+int vum_rsiDivOBLevel = input.int(60, title = 'RSI Bearish Divergence min', group = vum_rsi_group)
+int vum_rsiDivOSLevel = input.int(30, title = 'RSI Bullish Divergence min', group = vum_rsi_group)
+
+string vum_stoch_group = "Vumanchu: Stoch Settings"
+bool vum_stochShow = input.bool(true, title = 'Show Stochastic RSI', group = vum_stoch_group)
+bool vum_stochUseLog = input.bool(true, title=' Use Log?', group = vum_stoch_group)
+bool vum_stochAvg = input.bool(false, title='Use Average of both K & D', group = vum_stoch_group)
+vum_stochSRC = input.source(close, title = 'Stochastic RSI Source', group = vum_stoch_group)
+int vum_stochLen = input.int(14, title = 'Stochastic RSI Length', group = vum_stoch_group)
+int vum_stochRsiLen = input.int(14, title = 'RSI Length ', group = vum_stoch_group)
+int vum_stochKSmooth = input.int(3, title = 'Stochastic RSI K Smooth', group = vum_stoch_group)
+// --- CORRECTION DE LA FAUTE DE FRAPPE ---
+int vum_stochDSmooth = input.int(3, title = 'Stochastic RSI D Smooth', group = vum_stoch_group)
+bool vum_stochShowDiv = input.bool(false, title = 'Show Stoch Regular Divergences', group = vum_stoch_group)
+bool vum_stochShowHiddenDiv = input.bool(false, title = 'Show Stoch Hidden Divergences', group = vum_stoch_group)
+
+// (Autres inputs Vumanchu omis pour la brièveté de la stratégie, comme Schaff et Sommi, mais peuvent être ajoutés de la même manière)
+string vum_mode_group = "Vumanchu: Mode Settings"
+bool vum_darkMode = input.bool(false, title = 'Dark mode', group = vum_mode_group)
+
+// === COULEURS VUMANCHU (v5) ===
+color vum_colorRed = color.new(#ff0000, 0)
+color vum_colorPurple = color.new(#e600e6, 0)
+color vum_colorGreen = color.new(#3fff00, 0)
+color vum_colorOrange = color.new(#e2a400, 0)
+color vum_colorYellow = color.new(#ffe500, 0)
+color vum_colorWhite = color.new(#ffffff, 0)
+color vum_colorPink = color.new(#ff00f0, 0)
+color vum_colorBluelight = color.new(#31c0ff, 0)
+color vum_colorWT2 = color.new(#0d47a1, 0)
+color vum_colorWT2_ = color.new(#131722, 0)
+color vum_colormacdWT1a = color.new(#4caf58, 0)
+color vum_colormacdWT1b = color.new(#af4c4c, 0)
+color vum_colormacdWT1c = color.new(#7ee57e, 0)
+color vum_colormacdWT1d = color.new(#ff3535, 0)
+color vum_colormacdWT2a = color.new(#305630, 0)
+color vum_colormacdWT2b = color.new(#310101, 0)
+color vum_colormacdWT2c = color.new(#132213, 0)
+color vum_colormacdWT2d = color.new(#770000, 0)
+
+// === FONCTIONS VUMANCHU (v5) ===
+vum_f_top_fractal(vum_src) => vum_src[4] < vum_src[2] and vum_src[3] < vum_src[2] and vum_src[2] > vum_src[1] and vum_src[2] > vum_src[0]
+vum_f_bot_fractal(vum_src) => vum_src[4] > vum_src[2] and vum_src[3] > vum_src[2] and vum_src[2] < vum_src[1] and vum_src[2] < vum_src[0]
+vum_f_fractalize(vum_src) => vum_f_top_fractal(vum_src) ? 1 : vum_f_bot_fractal(vum_src) ? -1 : 0
+
+vum_f_findDivs(vum_src, vum_topLimit, vum_botLimit, vum_useLimits) =>
+    vum_fractalTop = vum_f_fractalize(vum_src) > 0 and (vum_useLimits ? vum_src[2] >= vum_topLimit : true) ? vum_src[2] : na
+    vum_fractalBot = vum_f_fractalize(vum_src) < 0 and (vum_useLimits ? vum_src[2] <= vum_botLimit : true) ? vum_src[2] : na
+    vum_highPrev = ta.valuewhen(vum_fractalTop, vum_src[2], 0)[2]
+    vum_highPrice = ta.valuewhen(vum_fractalTop, high[2], 0)[2]
+    vum_lowPrev = ta.valuewhen(vum_fractalBot, vum_src[2], 0)[2]
+    vum_lowPrice = ta.valuewhen(vum_fractalBot, low[2], 0)[2]
+    vum_bearSignal = vum_fractalTop and high[2] > vum_highPrice and vum_src[2] < vum_highPrev
+    vum_bullSignal = vum_fractalBot and low[2] < vum_lowPrice and vum_src[2] > vum_lowPrev
+    vum_bearDivHidden = vum_fractalTop and high[2] < vum_highPrice and vum_src[2] > vum_highPrev
+    vum_bullDivHidden = vum_fractalBot and low[2] > vum_lowPrice and vum_src[2] < vum_lowPrev
+    [vum_fractalTop, vum_fractalBot, vum_lowPrev, vum_bearSignal, vum_bullSignal, vum_bearDivHidden, vum_bullDivHidden]
+        
+vum_f_rsimfi(vum_period, vum_multiplier, vum_tf) => 
+    vum_mfi_calc = ta.sma(((close - open) / (high - low)) * vum_multiplier, vum_period) - vum_rsiMFIPosY
+    request.security(syminfo.tickerid, vum_tf, vum_mfi_calc)
+   
+vum_f_wavetrend(vum_src, vum_chlen, vum_avg, vum_malen, vum_tf) =>
+    vum_tfsrc = request.security(syminfo.tickerid, vum_tf, vum_src)
+    vum_esa = ta.ema(vum_tfsrc, vum_chlen)
+    vum_de = ta.ema(math.abs(vum_tfsrc - vum_esa), vum_chlen)
+    vum_ci = (vum_tfsrc - vum_esa) / (0.015 * vum_de)
+    vum_wt1 = request.security(syminfo.tickerid, vum_tf, ta.ema(vum_ci, vum_avg))
+    vum_wt2 = request.security(syminfo.tickerid, vum_tf, ta.sma(vum_wt1, vum_malen))
+    vum_wtVwap = vum_wt1 - vum_wt2
+    vum_wtOversold = vum_wt2 <= vum_osLevel
+    vum_wtOverbought = vum_wt2 >= vum_obLevel
+    vum_wtCross = ta.cross(vum_wt1, vum_wt2)
+    vum_wtCrossUp = vum_wt2 - vum_wt1 <= 0
+    vum_wtCrossDown = vum_wt2 - vum_wt1 >= 0
+    vum_wtCrosslast = ta.cross(vum_wt1[2], vum_wt2[2])
+    vum_wtCrossUplast = vum_wt2[2] - vum_wt1[2] <= 0
+    vum_wtCrossDownlast = vum_wt2[2] - vum_wt1[2] >= 0
+    [vum_wt1, vum_wt2, vum_wtOversold, vum_wtOverbought, vum_wtCross, vum_wtCrossUp, vum_wtCrossDown, vum_wtCrosslast, vum_wtCrossUplast, vum_wtCrossDownlast, vum_wtVwap]
+
+vum_f_stochrsi(vum_src, vum_stochlen, vum_rsilen, vum_smoothk, vum_smoothd, vum_log, vum_avg) =>
+    vum_src_stoch = vum_log ? math.log(vum_src) : vum_src
+    vum_rsi_stoch = ta.rsi(vum_src_stoch, vum_rsilen)
+    vum_kk = ta.sma(ta.stoch(vum_rsi_stoch, vum_rsi_stoch, vum_rsi_stoch, vum_stochlen), vum_smoothk)
+    vum_d1 = ta.sma(vum_kk, vum_smoothd)
+    vum_avg_1 = math.avg(vum_kk, vum_d1)
+    vum_k = vum_avg ? vum_avg_1 : vum_kk
+    [vum_k, vum_d1]
+ 
+// === CALCULS VUMANCHU ===
+vum_rsi = ta.rsi(vum_rsiSRC, vum_rsiLen)
+vum_rsiobcolor = input(color.new(#e13e3e, 0), 'RSI OverBought', group = 'Vumanchu: Color Settings')
+vum_rsioscolor = input(color.new(#3ee145, 0), 'RSI OverSold', group = 'Vumanchu: Color Settings')
+vum_rsinacolor = input(color.new(#c33ee1, 0), 'RSI InBetween', group = 'Vumanchu: Color Settings')
+vum_rsiColor = vum_rsi <= vum_rsiOversold ? vum_rsioscolor : vum_rsi >= vum_rsiOverbought ? vum_rsiobcolor : vum_rsinacolor
+
+vum_rsiMFI = vum_f_rsimfi(vum_rsiMFIperiod, vum_rsiMFIMultiplier, timeframe.period)
+vum_rsiMFIColorAbove = input(color.new(#3ee145, 0), 'MFI Color > 0', group = 'Vumanchu: Color Settings')
+vum_rsiMFIColorBelow = input(color.new(#ff3d2e, 0), 'MFI Color < 0', group = 'Vumanchu: Color Settings')
+vum_rsiMFIColor = vum_rsiMFI > 0 ? vum_rsiMFIColorAbove : vum_rsiMFIColorBelow
+
+[vum_wt1, vum_wt2, vum_wtOversold, vum_wtOverbought, vum_wtCross, vum_wtCrossUp, vum_wtCrossDown, vum_wtCross_last, vum_wtCrossUp_last, vum_wtCrossDown_last, vum_wtVwap] = vum_f_wavetrend(vum_wtMASource, vum_wtChannelLen, vum_wtAverageLen, vum_wtMALen, timeframe.period)
+ 
+[vum_stochK, vum_stochD] = vum_f_stochrsi(vum_stochSRC, vum_stochLen, vum_stochRsiLen, vum_stochKSmooth, vum_stochDSmooth, vum_stochUseLog, vum_stochAvg)
+
+[vum_wtFractalTop, vum_wtFractalBot, vum_wtLow_prev, vum_wtBearDiv, vum_wtBullDiv, vum_wtBearDivHidden, vum_wtBullDivHidden] = vum_f_findDivs(vum_wt2, vum_wtDivOBLevel, vum_wtDivOSLevel, true)
+[vum_wtFractalTop_add, vum_wtFractalBot_add, vum_wtLow_prev_add, vum_wtBearDiv_add, vum_wtBullDiv_add, vum_wtBearDivHidden_add, vum_wtBullDivHidden_add] =  vum_f_findDivs(vum_wt2, vum_wtDivOBLevel_add, vum_wtDivOSLevel_add, true)
+[vum_wtFractalTop_nl, vum_wtFractalBot_nl, vum_wtLow_prev_nl, vum_wtBearDiv_nl, vum_wtBullDiv_nl, vum_wtBearDivHidden_nl, vum_wtBullDivHidden_nl] =  vum_f_findDivs(vum_wt2, 0, 0, false)
+vum_wtBearDivHidden_ = vum_showHiddenDiv_nl ? vum_wtBearDivHidden_nl : vum_wtBearDivHidden
+vum_wtBullDivHidden_ = vum_showHiddenDiv_nl ? vum_wtBullDivHidden_nl : vum_wtBullDivHidden
+
+vum_WTBearDivColorDown = input(color.new(#e60000, 0), 'WT Bear Div', group = 'Vumanchu: Color Settings') 
+vum_wtBullDivColorUp = input(color.new(#00e676, 0), 'WT Bull Div', group = 'Vumanchu: Color Settings') 
+vum_wtBearDivColor = (vum_wtShowDiv and vum_wtBearDiv) or (vum_wtShowHiddenDiv and vum_wtBearDivHidden_) ? vum_WTBearDivColorDown : na
+vum_wtBullDivColor = (vum_wtShowDiv and vum_wtBullDiv) or (vum_wtShowHiddenDiv and vum_wtBullDivHidden_) ? vum_wtBullDivColorUp : na
+vum_wtBearDivColor_add = (vum_wtShowDiv and (vum_wtDivOBLevel_addshow and vum_wtBearDiv_add)) or (vum_wtShowHiddenDiv and (vum_wtDivOBLevel_addshow and vum_wtBearDivHidden_add)) ? vum_WTBearDivColorDown: na
+vum_wtBullDivColor_add = (vum_wtShowDiv and (vum_wtDivOBLevel_addshow and vum_wtBullDiv_add)) or (vum_wtShowHiddenDiv and (vum_wtDivOBLevel_addshow and vum_wtBullDivHidden_add)) ? vum_wtBullDivColorUp : na
+
+[vum_rsiFractalTop, vum_rsiFractalBot, vum_rsiLow_prev, vum_rsiBearDiv, vum_rsiBullDiv, vum_rsiBearDivHidden, vum_rsiBullDivHidden] = vum_f_findDivs(vum_rsi, vum_rsiDivOBLevel, vum_rsiDivOSLevel, true)
+[vum_rsiFractalTop_nl, vum_rsiFractalBot_nl, vum_rsiLow_prev_nl, vum_rsiBearDiv_nl, vum_rsiBullDiv_nl, vum_rsiBearDivHidden_nl, vum_rsiBullDivHidden_nl] = vum_f_findDivs(vum_rsi, 0, 0, false)
+vum_rsiBearDivHidden_ = vum_showHiddenDiv_nl ? vum_rsiBearDivHidden_nl : vum_rsiBearDivHidden
+vum_rsiBullDivHidden_ = vum_showHiddenDiv_nl ? vum_rsiBullDivHidden_nl : vum_rsiBullDivHidden
+vum_rsiBearColor = color.new(#e60000, 0)
+vum_rsiBullColor = color.new(#38ff42, 0)
+vum_rsiBearDivColor = (vum_rsiShowDiv and vum_rsiBearDiv) or (vum_rsiShowHiddenDiv and vum_rsiBearDivHidden_) ? vum_rsiBearColor : na
+vum_rsiBullDivColor = (vum_rsiShowDiv and vum_rsiBullDiv) or (vum_rsiShowHiddenDiv and vum_rsiBullDivHidden_) ? vum_rsiBullColor : na
+ 
+[vum_stochFractalTop, vum_stochFractalBot, vum_stochLow_prev, vum_stochBearDiv, vum_stochBullDiv, vum_stochBearDivHidden, vum_stochBullDivHidden] = vum_f_findDivs(vum_stochK, 0, 0, false)
+vum_stochbearcolor = color.new(#e60000, 0)
+vum_stochbullcolor = color.new(#38ff42, 0)
+vum_stochBearDivColor = (vum_stochShowDiv and vum_stochBearDiv) or (vum_stochShowHiddenDiv and vum_stochBearDivHidden) ? vum_stochbearcolor : na
+vum_stochBullDivColor = (vum_stochShowDiv and vum_stochBullDiv) or (vum_stochShowHiddenDiv and vum_stochBullDivHidden) ? vum_stochbullcolor : na
+
+vum_signalcolorup = input(color.new(#00e676, 0), 'WT Buy Dot', group = 'Vumanchu: Color Settings')
+vum_signalcolordown = input(color.new(#ff5252, 0), 'WT Sell Dot', group = 'Vumanchu: Color Settings')
+vum_signalColor = vum_wt2 - vum_wt1 > 0 ? vum_signalcolordown : vum_signalcolorup
+
+// === SIGNAUX VUMANCHU (Requirement 6 & 7) ===
+vum_buySignal = vum_wtCross and vum_wtCrossUp and vum_wtOversold // Green Dot
+vum_buySignalDiv = (vum_wtShowDiv and vum_wtBullDiv) or (vum_wtShowDiv and vum_wtBullDiv_add) or (vum_stochShowDiv and vum_stochBullDiv) or (vum_rsiShowDiv and vum_rsiBullDiv)
+vum_buySignalDiv_color = vum_wtBullDiv ? vum_colorGreen : vum_wtBullDiv_add ? color.new(vum_colorGreen, 60) : vum_rsiShowDiv ? vum_colorGreen : na
+
+vum_sellSignal = vum_wtCross and vum_wtCrossDown and vum_wtOverbought // Red Dot
+vum_sellSignalDiv = (vum_wtShowDiv and vum_wtBearDiv) or (vum_wtShowDiv and vum_wtBearDiv_add) or (vum_stochShowDiv and vum_stochBearDiv) or (vum_rsiShowDiv and vum_rsiBearDiv)
+vum_sellSignalDiv_color = vum_wtBearDiv ? vum_colorRed : vum_wtBearDiv_add ? color.new(vum_colorRed, 60) : vum_rsiBearDiv ? vum_colorRed : na
+
+vum_lastRsi = ta.valuewhen(vum_wtFractalBot, vum_rsi[2], 0)[2]
+vum_wtGoldBuy = ((vum_wtShowDiv and vum_wtBullDiv) or (vum_rsiShowDiv and vum_rsiBullDiv)) and vum_wtLow_prev <= vum_osLevel3 and vum_wt2 > vum_osLevel3 and vum_wtLow_prev - vum_wt2 <= -5 and vum_lastRsi < 30           
+          
+// === PLOTS VUMANCHU (Requirement 9) ===
+plotchar(vum_wtBuyShow and vum_buySignal ? low * 0.99 : na, title = 'Vum Buy circle', char='•', color = color.new(vum_colorGreen, 50), location = location.absolute, size = size.small)
+plotchar(vum_wtSellShow and vum_sellSignal ? high * 1.01 : na , title = 'Vum Sell circle', char='•', color = color.new(vum_colorRed, 50), location = location.absolute, size = size.small)
+plotchar(vum_wtDivShow and vum_buySignalDiv ? low * 0.985 : na, title = 'Vum Divergence buy circle', char='•', color = color.new(vum_buySignalDiv_color, 15), location = location.absolute, size = size.small, offset = -2)
+plotchar(vum_wtDivShow and vum_sellSignalDiv ? high * 1.015 : na, title = 'Vum Divergence sell circle', char='•', color = color.new(vum_sellSignalDiv_color, 15), location = location.absolute, size = size.small, offset = -2)
+plotchar(vum_wtGoldBuy and vum_wtGoldShow ? low * 0.98 : na, title = 'Vum Gold buy gold circle', char='•', color = color.new(vum_colorOrange, 15), location = location.absolute, size = size.normal, offset = -2)
+
+
+// =============================================================================
+// 4. LOGIQUE DE STRATÉGIE (Requirements 6, 7, 8)
+// =============================================================================
+
+// --- 4.1. Définition des conditions de base ---
+
+// Vumanchu Conditions
+bool vum_MFI_Bullish = vum_rsiMFI > 0
+bool vum_MFI_Bearish = vum_rsiMFI < 0
+bool vum_Green_Dot = vum_buySignal
+bool vum_Red_Dot = vum_sellSignal
+
+// Mxwell Conditions (Maintenant reçues de l'appel de fonction global)
+bool mxw_Struct_Bullish = mxw_isBullishBOS or mxw_isBullishCHoCH // Tendance haussière confirmée
+bool mxw_Struct_Bearish = mxw_isBearishBOS or mxw_isBearishCHoCH // Tendance baissière confirmée
+
+// --- 4.2. Fonctions de détection POI (Requirement 6 & 7) ---
+
+// Renvoie [bool, float] -> [EstDansPOI, NiveauSLStructurel]
+f_isPriceInBullishPOI() =>
+    bool isInPOI = false
+    float structuralSL = na
+    
+    // 1. Vérifier FVG Bullish (mxw_fvgUp)
+    if mxw_fvgUp.size() > 0
+        for i = 0 to mxw_fvgUp.size() - 1
+            box fvgBox = mxw_fvgUp.get(i)
+            // Le prix entre-t-il dans le FVG?
+            if low <= fvgBox.get_top() and high >= fvgBox.get_bottom()
+                isInPOI := true
+                structuralSL := fvgBox.get_bottom() // SL sous le FVG
+                break // Sortir de la boucle dès qu'une POI est trouvée
+    
+    // 2. Vérifier OB Bullish (mxw_lowBlock) si aucun FVG n'a été trouvé
+    if not isInPOI and mxw_lowBlock.size() > 0
+        for i = 0 to mxw_lowBlock.size() - 1
+            box obBox = mxw_lowBlock.get(i)
+            // Le prix entre-t-il dans l'OB?
+            if low <= obBox.get_top() and high >= obBox.get_bottom()
+                isInPOI := true
+                structuralSL := obBox.get_bottom() // SL sous l'OB
+                break
+                
+    [isInPOI, structuralSL]
+
+// Renvoie [bool, float] -> [EstDansPOI, NiveauSLStructurel]
+f_isPriceInBearishPOI() =>
+    bool isInPOI = false
+    float structuralSL = na
+    
+    // 1. Vérifier FVG Bearish (mxw_fvgDn)
+    if mxw_fvgDn.size() > 0
+        for i = 0 to mxw_fvgDn.size() - 1
+            box fvgBox = mxw_fvgDn.get(i)
+            // Le prix entre-t-il dans le FVG?
+            if high >= fvgBox.get_bottom() and low <= fvgBox.get_top()
+                isInPOI := true
+                structuralSL := fvgBox.get_top() // SL au-dessus du FVG
+                break 
+    
+    // 2. Vérifier OB Bearish (mxw_highBlock)
+    if not isInPOI and mxw_highBlock.size() > 0
+        for i = 0 to mxw_highBlock.size() - 1
+            box obBox = mxw_highBlock.get(i)
+            // Le prix entre-t-il dans l'OB?
+            if high >= obBox.get_bottom() and low <= obBox.get_top()
+                isInPOI := true
+                structuralSL := obBox.get_top() // SL au-dessus de l'OB
+                break
+                
+    [isInPOI, structuralSL]
+
+// --- 4.3. Exécution de la stratégie ---
+
+[strat_isInBullPOI, strat_struct_SL_long] = f_isPriceInBullishPOI()
+[strat_isInBearPOI, strat_struct_SL_short] = f_isPriceInBearishPOI()
+
+// Conditions finales avec filtres
+bool longCondition = 
+     (strat_filter_mfi ? vum_MFI_Bullish : true) and 
+     (strat_filter_bos ? mxw_Struct_Bullish : true) and 
+     (strat_filter_poi ? strat_isInBullPOI : true) and 
+     (strat_filter_dot ? vum_Green_Dot : true)
+
+bool shortCondition = 
+     (strat_filter_mfi ? vum_MFI_Bearish : true) and 
+     (strat_filter_bos ? mxw_Struct_Bearish : true) and 
+     (strat_filter_poi ? strat_isInBearPOI : true) and 
+     (strat_filter_dot ? vum_Red_Dot : true)
+
+// Calculs SL/TP (Requirement 8)
+float strat_atr = ta.atr(strat_atr_len)
+
+// SL
+float long_sl_price = switch strat_sl_type
+    "Structurel" => strat_struct_SL_long
+    "ATR"        => close - (strat_atr * strat_atr_mult)
+float short_sl_price = switch strat_sl_type
+    "Structurel" => strat_struct_SL_short
+    "ATR"        => close + (strat_atr * strat_atr_mult)
+
+// TP (Basé sur le dernier plus haut/bas structurel externe de Mxwell)
+float long_tp_price = mxw_bigData.get("upaxis") // Target = dernier HH/LH externe (EQH)
+float short_tp_price = mxw_bigData.get("dnaxis") // Target = dernier LL/HL externe (EQL)
+
+// ******** CORRECTION FINALE (Logique) ********
+// Suppression de la ligne erronée
+// strategy.risk.percent_of_equity(strat_risk_perc) 
+// *********************************************
+
+// Entrée et Sortie
+if (longCondition and strategy.position_size == 0)
+    // ******** CORRECTION FINALE (Logique) ********
+    // Ajout de qty = strat_risk_perc
+    strategy.entry("Long", strategy.long, qty = strat_risk_perc)
+    // *********************************************
+    strategy.exit("Exit Long", from_entry="Long", stop=long_sl_price, limit=long_tp_price)
+
+if (shortCondition and strategy.position_size == 0)
+    // ******** CORRECTION FINALE (Logique) ********
+    // Ajout de qty = strat_risk_perc
+    strategy.entry("Short", strategy.short, qty = strat_risk_perc)
+    // *********************************************
+    strategy.exit("Exit Short", from_entry="Short", stop=short_sl_price, limit=short_tp_price)
+
+// Plot des niveaux SL/TP pour visualisation
+plot(strategy.position_size > 0 ? long_sl_price : na, "Long SL", color=color.new(color.red, 0), style=plot.style_linebr)
+plot(strategy.position_size > 0 ? long_tp_price : na, "Long TP", color=color.new(color.green, 0), style=plot.style_linebr)
+plot(strategy.position_size < 0 ? short_sl_price : na, "Short SL", color=color.new(color.red, 0), style=plot.style_linebr)
+plot(strategy.position_size < 0 ? short_tp_price : na, "Short TP", color=color.new(color.green, 0), style=plot.style_linebr)
