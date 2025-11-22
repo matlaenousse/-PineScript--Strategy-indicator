@@ -115,7 +115,9 @@ type mxw_rollingTF
     map   <string, label>         rTFlabel
 
 method mxw_tfDraw(mxw_rollingTF mxw_id, int mxw_tfDiff, bool mxw_showRollingLab, string mxw_tf, bool mxw_showLevels) => 
-    mxw_TFhrdata = mxw_rollingTF.new()
+    // On n'initialise PAS de nouvelle variable. On utilise "mxw_id" directement.
+    // mxw_TFhrdata = mxw_rollingTF.new() // <-- LIGNE SUPPRIMÉE
+    
     var mxw_volRolling = array.new<float>()
     if mxw_highArr.size() > mxw_tfDiff
         for i = 0 to mxw_tfDiff
@@ -123,34 +125,48 @@ method mxw_tfDraw(mxw_rollingTF mxw_id, int mxw_tfDiff, bool mxw_showRollingLab,
                 mxw_getHigh = mxw_highArr.get(i)
                 mxw_getLow = mxw_lowArr.get(i)
                 mxw_getTime = mxw_timeArr.get(i)
-                mxw_TFhrdata.highTF := math.max(mxw_TFhrdata.highTF, mxw_getHigh)
-                mxw_TFhrdata.lowTF  := math.min(mxw_TFhrdata.lowTF , mxw_getLow)
-                if mxw_TFhrdata.highTF == mxw_getHigh 
-                    mxw_TFhrdata.highTFt := mxw_timeArr.get(i)
-                if mxw_TFhrdata.lowTF == mxw_getLow
-                    mxw_TFhrdata.lowTFt  := mxw_timeArr.get(i)
-            mxw_TFhrdata.volTF += mxw_volArr.get(i)
-        mxw_volRolling.push(mxw_TFhrdata.volTF)
+                
+                // Remplacer "mxw_TFhrdata" par "mxw_id"
+                mxw_id.highTF := math.max(mxw_id.highTF, mxw_getHigh)
+                mxw_id.lowTF  := math.min(mxw_id.lowTF , mxw_getLow)
+                
+                if mxw_id.highTF == mxw_getHigh 
+                    mxw_id.highTFt := mxw_timeArr.get(i)
+                if mxw_id.lowTF == mxw_getLow
+                    mxw_id.lowTFt  := mxw_timeArr.get(i)
+                    
+            // Remplacer "mxw_TFhrdata" par "mxw_id"
+            mxw_id.volTF += mxw_volArr.get(i)
+            
+        // Remplacer "mxw_TFhrdata" par "mxw_id"
+        mxw_volRolling.push(mxw_id.volTF)
+        
         var mxw_lineDraw = mxw_rollingTF.new(rTFdraw = map.new<string, line>(), rTFlabel = map.new<string, label>())
         if mxw_showLevels
             switch mxw_lineDraw.rTFdraw.size() == 0
                 true =>  
-                    mxw_lineDraw.rTFdraw.put("High", line.new(mxw_TFhrdata.highTFt, mxw_TFhrdata.highTF, time, mxw_TFhrdata.highTF, xloc = xloc.bar_time, color = color.aqua))
-                    mxw_lineDraw.rTFdraw.put("Low" , line.new(mxw_TFhrdata.lowTFt , mxw_TFhrdata.lowTF , time, mxw_TFhrdata.lowTF , xloc = xloc.bar_time, color = color.aqua))
+                    // Remplacer "mxw_TFhrdata" par "mxw_id"
+                    mxw_lineDraw.rTFdraw.put("High", line.new(mxw_id.highTFt, mxw_id.highTF, time, mxw_id.highTF, xloc = xloc.bar_time, color = color.aqua))
+                    mxw_lineDraw.rTFdraw.put("Low" , line.new(mxw_id.lowTFt , mxw_id.lowTF , time, mxw_id.lowTF , xloc = xloc.bar_time, color = color.aqua))
                 =>       
-                    mxw_lineDraw.rTFdraw.get("High").set_xy1(mxw_TFhrdata.highTFt, mxw_TFhrdata.highTF)
-                    mxw_lineDraw.rTFdraw.get("High").set_xy2(time, mxw_TFhrdata.highTF)
-                    mxw_lineDraw.rTFdraw.get("Low").set_xy1(mxw_TFhrdata.lowTFt, mxw_TFhrdata.lowTF)
-                    mxw_lineDraw.rTFdraw.get("Low").set_xy2(time, mxw_TFhrdata.lowTF)
+                    // Remplacer "mxw_TFhrdata" par "mxw_id"
+                    mxw_lineDraw.rTFdraw.get("High").set_xy1(mxw_id.highTFt, mxw_id.highTF)
+                    mxw_lineDraw.rTFdraw.get("High").set_xy2(time, mxw_id.highTF)
+                    mxw_lineDraw.rTFdraw.get("Low").set_xy1(mxw_id.lowTFt, mxw_id.lowTF)
+                    mxw_lineDraw.rTFdraw.get("Low").set_xy2(time, mxw_id.lowTF)
             if mxw_showRollingLab 
                 switch mxw_lineDraw.rTFlabel.size() == 0
                     true =>  
-                        mxw_lineDraw.rTFlabel.put("High", label.new(time, mxw_TFhrdata.highTF, xloc = xloc.bar_time, textcolor = color.aqua, text = mxw_tf + "H", size = size.tiny, style = label.style_label_left, color = #00000000))
-                        mxw_lineDraw.rTFlabel.put("Low" , label.new(time, mxw_TFhrdata.lowTF , xloc = xloc.bar_time, textcolor = color.aqua, text = mxw_tf + "L", size = size.tiny, style = label.style_label_left, color = #00000000))
+                        // Remplacer "mxw_TFhrdata" par "mxw_id"
+                        mxw_lineDraw.rTFlabel.put("High", label.new(time, mxw_id.highTF, xloc = xloc.bar_time, textcolor = color.aqua, text = mxw_tf + "H", size = size.tiny, style = label.style_label_left, color = #00000000))
+                        mxw_lineDraw.rTFlabel.put("Low" , label.new(time, mxw_id.lowTF , xloc = xloc.bar_time, textcolor = color.aqua, text = mxw_tf + "L", size = size.tiny, style = label.style_label_left, color = #00000000))
                     =>  
-                        mxw_lineDraw.rTFlabel.get("High").set_xy(time, mxw_TFhrdata.highTF)
-                        mxw_lineDraw.rTFlabel.get("Low").set_xy(time, mxw_TFhrdata.lowTF)
-    [mxw_TFhrdata.volTF, mxw_volRolling]
+                        // Remplacer "mxw_TFhrdata" par "mxw_id"
+                        mxw_lineDraw.rTFlabel.get("High").set_xy(time, mxw_id.highTF)
+                        mxw_lineDraw.rTFlabel.get("Low").set_xy(time, mxw_id.lowTF)
+                        
+    // Remplacer "mxw_TFhrdata" par "mxw_id"
+    [mxw_id.volTF, mxw_volRolling]
 
 mxw_tfDrawLower(bool mxw_showRollingLab, simple string mxw_tf, bool mxw_showLevels) => 
     simple int mxw_end = switch mxw_tf 
@@ -741,8 +757,8 @@ string vum_rsi_group = "Vumanchu: RSI Settings"
 bool vum_rsiShow = input.bool(true, title = 'Show RSI', group = vum_rsi_group)
 vum_rsiSRC = input.source(close, title = 'RSI Source', group = vum_rsi_group)
 int vum_rsiLen = input.int(14, title = 'RSI Length', group = vum_rsi_group)
-int vum_rsiOversold = input.int(30, title = 'RSI Oversold', minval = 50, maxval = 100, group = vum_rsi_group)
-int vum_rsiOverbought = input.int(60, title = 'RSI Overbought', minval = 0, maxval = 50, group = vum_rsi_group)
+int vum_rsiOversold = input.int(30, title = 'RSI Oversold', minval = 0, maxval = 50, group = vum_rsi_group)
+int vum_rsiOverbought = input.int(60, title = 'RSI Overbought', minval = 50, maxval = 100, group = vum_rsi_group)
 bool vum_rsiShowDiv = input.bool(false, title = 'Show RSI Regular Divergences', group = vum_rsi_group)
 bool vum_rsiShowHiddenDiv = input.bool(false, title = 'Show RSI Hidden Divergences', group = vum_rsi_group)
 int vum_rsiDivOBLevel = input.int(60, title = 'RSI Bearish Divergence min', group = vum_rsi_group)
