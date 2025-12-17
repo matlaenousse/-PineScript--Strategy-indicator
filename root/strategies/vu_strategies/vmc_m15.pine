@@ -1,0 +1,188 @@
+//@version=6
+strategy("VMC Strat M15 Ultimate (ADX + Div)", shorttitle="VMC M15 PRO", overlay=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, currency=currency.USD)
+
+// ==========================================
+// 1. SETTINGS
+// ==========================================
+
+// --- Gestion du Risque (Améliorée) ---
+grp_risk = "0. Risk Management"
+useRiskMgmt = input.bool(true, "Use SL/TP?", group=grp_risk)
+sl_atr_mult = input.float(2.0, "SL Multiplier (ATR)", group=grp_risk)
+tp_ratio = input.float(1.5, "Take Profit Ratio (Risk:Reward)", group=grp_risk)
+useTrailing = input.bool(true, "Use Trailing Stop?", group=grp_risk, tooltip="Active un stop suiveur qui remonte quand le prix monte")
+trail_atr_mult = input.float(2.5, "Trailing Stop ATR Distance", group=grp_risk)
+atrLen = input.int(14, "ATR Length", group=grp_risk)
+
+// --- MTF Filters ---
+grp_mtf = "00. Multi-Timeframe Filters"
+useMtfFilter = input.bool(true, "Filter with H1/H4?", group=grp_mtf)
+h1_tf = input.timeframe("60", "H1 Timeframe", group=grp_mtf)
+h4_tf = input.timeframe("240", "H4 Timeframe", group=grp_mtf)
+
+// --- ADX Filter (NOUVEAU) ---
+grp_adx = "01. ADX Filter (Anti-Chop)"
+useAdx = input.bool(true, "Use ADX Filter?", group=grp_adx, tooltip="Ne prend pas de trade si le marché est plat (ADX faible)")
+adxThresh = input.int(20, "Min ADX Level", group=grp_adx)
+adxSmoothing = input.int(14, "ADX Smoothing", group=grp_adx)
+
+// --- Divergences (NOUVEAU) ---
+grp_div = "02. Divergences"
+useDiv = input.bool(false, "Require Bullish Divergence?", group=grp_div, tooltip="Si activé, n'entre QUE s'il y a une divergence haussière (Prix baisse, Indicateur monte)")
+divLookback = input.int(5, "Pivot Lookback", group=grp_div)
+
+// --- Trend & WaveTrend ---
+grp_core = "1. Core Strategy"
+emaLen = input.int(200, "EMA Trend Length", group=grp_core)
+wtChannelLen = input.int(9, "WT Channel Length", group=grp_core)
+wtAverageLen = input.int(12, "WT Average Length", group=grp_core)
+wtBuyLevel = input.int(-50, "WT Oversold Level", group=grp_core) // Simplifié pour la lisibilité
+
+// --- RSI & MFI ---
+grp_osc = "2. Oscillators"
+rsiLen = input.int(14, "RSI Length", group=grp_osc)
+rsiBuyLevel = input.int(55, "RSI Max Level", group=grp_osc)
+mfiPeriod = input.int(60, "MFI Period", group=grp_osc)
+
+// ==========================================
+// 2. FONCTIONS
+// ==========================================
+
+f_wavetrend(_src, _chLen, _avgLen) =>
+    _ap = hlc3
+    _esa = ta.ema(_ap, _chLen)
+    _d = ta.ema(math.abs(_ap - _esa), _chLen)
+    _ci = (_ap - _esa) / (0.015 * _d)
+    _wt1 = ta.ema(_ci, _avgLen)
+    _wt2 = ta.sma(_wt1, 3)
+    [_wt1, _wt2]
+
+// ==========================================
+// 3. CALCULS INDICATEURS
+// ==========================================
+
+// ATR
+atrVal = ta.atr(atrLen)
+
+// EMA Trend
+emaTrend = ta.ema(close, emaLen)
+isBullishTrend = close > emaTrend
+
+// ADX Logic
+[diplus, diminus, adxVal] = ta.dmi(adxSmoothing, adxSmoothing)
+isAdxOk = useAdx ? (adxVal > adxThresh) : true
+
+// WaveTrend M15
+[wt1, wt2] = f_wavetrend(close, wtChannelLen, wtAverageLen)
+
+// RSI & MFI
+rsiVal = ta.rsi(close, rsiLen)
+mfiRaw = ((close - open) / (high - low)) * 150.0
+mfiVal = ta.sma(mfiRaw, mfiPeriod) - 2.5 
+
+// MTF Security
+[h1_wt1, h1_wt2] = request.security(syminfo.tickerid, h1_tf, f_wavetrend(close, wtChannelLen, wtAverageLen))
+[h4_wt1, h4_wt2] = request.security(syminfo.tickerid, h4_tf, f_wavetrend(close, wtChannelLen, wtAverageLen))
+
+// ==========================================
+// 4. LOGIQUE DIVERGENCE (AVANCÉ)
+// ==========================================
+
+// On détecte les pivots bas du WaveTrend ( creux )
+wt_low = ta.pivotlow(wt1, divLookback, 1) 
+// Si on a un pivot, on garde en mémoire sa valeur et le prix correspondant
+var float last_wt_low = na
+var float last_price_low = na
+var float prev_wt_low = na
+var float prev_price_low = na
+
+if not na(wt_low)
+    prev_wt_low := last_wt_low
+    prev_price_low := last_price_low
+    last_wt_low := wt_low
+    last_price_low := low[1] // Le low correspondant au pivot
+
+// Condition Divergence :
+// 1. Le creux actuel du WT est PLUS HAUT que le creux précédent (Momentum monte)
+// 2. Le prix actuel est PLUS BAS (ou égal) que le prix au creux précédent (Prix descend)
+hasDivergence = false
+if useDiv and not na(wt_low)
+    if last_wt_low > prev_wt_low and last_price_low <= prev_price_low
+        hasDivergence := true
+else if not useDiv
+    hasDivergence := true // Si désactivé, on valide toujours
+
+// ==========================================
+// 5. CONDITIONS D'ENTRÉE
+// ==========================================
+
+// Base Triggers
+wtCrossUp = ta.crossover(wt1, wt2)
+wtOversold = wt2 < wtBuyLevel // Zone basse
+
+// Filtres
+mtfSafe = useMtfFilter ? (h1_wt2 < 60 and h4_wt2 < 70) : true // Pas d'achat si H1/H4 surchauffés
+oscSafe = rsiVal < rsiBuyLevel and mfiVal > mfiVal[1]
+
+// Assemblage Signal
+longCondition = wtCrossUp and wtOversold and isBullishTrend and isAdxOk and mtfSafe and oscSafe
+
+// Ajout Divergence (si activée, elle doit être présente récemment ou sur le signal)
+// Note: La divergence est souvent détectée quelques bougies avant le crossover. 
+// Pour simplifier ici, on n'utilise "hasDivergence" que si l'utilisateur coche l'option stricte.
+if useDiv
+    longCondition := longCondition and (last_wt_low > prev_wt_low and close < prev_price_low)
+
+// ==========================================
+// 6. EXECUTION & SORTIE (Trailing Stop)
+// ==========================================
+
+var float entryPrice = na
+var float slPrice = na
+var float tpPrice = na
+
+if longCondition
+    entryPrice := close
+    sl_dist = atrVal * sl_atr_mult
+    slPrice := close - sl_dist
+    tpPrice := close + (sl_dist * tp_ratio)
+    strategy.entry("Long", strategy.long, comment="Entry")
+
+if strategy.position_size > 0
+    // Gestion du Trailing Stop
+    if useTrailing
+        // Si le prix monte, on calcule où devrait être le nouveau SL
+        newSL = close - (atrVal * trail_atr_mult)
+        // On ne remonte le SL que s'il est plus haut que l'ancien
+        if newSL > slPrice
+            slPrice := newSL
+            
+    // Sortie Trailing ou TP Fixe
+    strategy.exit("Exit", "Long", stop=slPrice, limit=tpPrice, comment_loss="SL/Trail", comment_profit="TP Target")
+
+// ==========================================
+// 7. VISUELS
+// ==========================================
+
+plot(wt1, "WT1", color=color.new(color.green, 10))
+plot(wt2, "WT2", color=color.new(color.red, 10))
+hline(wtBuyLevel, "Oversold", color=color.gray)
+plot(emaTrend, "EMA 200", color=color.orange, display=display.pane)
+
+// Dashboard Status
+var table db = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 50))
+if barstate.islast
+    table.cell(db, 0, 0, "Filter", text_color=color.white, bgcolor=color.gray)
+    table.cell(db, 1, 0, "State", text_color=color.white, bgcolor=color.gray)
+    
+    table.cell(db, 0, 1, "Trend M15", text_color=color.white)
+    table.cell(db, 1, 1, isBullishTrend ? "BULL" : "BEAR", text_color=isBullishTrend ? color.green : color.red)
+    
+    table.cell(db, 0, 2, "ADX (>"+str.tostring(adxThresh)+")", text_color=color.white)
+    table.cell(db, 1, 2, str.tostring(math.round(adxVal)), text_color=isAdxOk ? color.green : color.gray)
+    
+    table.cell(db, 0, 3, "H1 WT", text_color=color.white)
+    table.cell(db, 1, 3, str.tostring(math.round(h1_wt2)), text_color=h1_wt2<60 ? color.green : color.red)
+
+    table.cell(db, 0, 4, "MFI Mom", text_color=color.white)
+    table.cell(db, 1, 4, mfiVal > mfiVal[1] ? "UP" : "DOWN", text_color=mfiVal > mfiVal[1] ? color.green : color.red)

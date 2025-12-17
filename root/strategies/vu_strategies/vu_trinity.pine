@@ -1,0 +1,154 @@
+//@version=6
+strategy('Trinity Confluence: Vumanchu + EMA + Fibs', shorttitle = 'Trinity', overlay = true, initial_capital = 1000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10, currency = currency.USD)
+
+// ==========================================
+// 1. CONFIGURATION & INPUTS
+// ==========================================
+
+// --- Vumanchu (WaveTrend) ---
+grp_vmc = '1. Vumanchu (Momentum)'
+wtChannelLen = input.int(10, 'WT Channel Length', group = grp_vmc) // Note: Rapport suggère 9 ou 10
+wtAverageLen = input.int(21, 'WT Average Length', group = grp_vmc)
+wtMALen = input.int(4, 'WT MA Length', group = grp_vmc)
+osLevel = input.int(-60, 'Oversold Level (Trigger)', maxval = 0, group = grp_vmc, tooltip = 'Niveau sous lequel le croisement doit se produire')
+
+// --- Moyennes Mobiles (Tendance) ---
+grp_ma = '2. Filtre de Tendance (EMA)'
+maLength = input.int(200, 'EMA Length', group = grp_ma)
+useMaProximity = input.bool(false, 'Utiliser filtre de proximité ?', group = grp_ma)
+maProximityPct = input.float(2.0, 'Seuil de proximité (%)', minval = 0.1, step = 0.1, group = grp_ma, tooltip = 'Le prix doit être à moins de X% de l\'EMA pour valider l\'entrée')
+
+// --- Fibonacci / Structure (Mxwell Logic) ---
+grp_fib = '3. Structure de Marché (Auto-Fibs)'
+pivotLeft = input.int(10, 'Pivot Lookback Left', group = grp_fib)
+pivotRight = input.int(10, 'Pivot Lookback Right', group = grp_fib)
+fib05 = 0.5
+fib618 = 0.618
+
+// --- Gestion du Risque ---
+grp_risk = '4. Gestion de Position'
+sl_mode = input.string('Swing Low', 'Mode Stop Loss', options = ['Swing Low', 'Fixed %'], group = grp_risk)
+sl_fixed_pct = input.float(2.0, 'Stop Loss Fixe (%)', group = grp_risk)
+tp1_fib = 0.0 // Retour au sommet précédent (0.0)
+tp2_fib = -0.272 // Extension Fibonacci
+tp1_qty = 0.5 // 50% de la position
+
+// ==========================================
+// 2. CALCULS DES INDICATEURS
+// ==========================================
+
+// --- A. Calcul WaveTrend (Vumanchu Cipher B Core) ---
+// Note: On recrée la logique mathématique pure sans les éléments graphiques superflus
+ap = hlc3
+esa = ta.ema(ap, wtChannelLen)
+d = ta.ema(math.abs(ap - esa), wtChannelLen)
+ci = (ap - esa) / (0.015 * d)
+tci = ta.ema(ci, wtAverageLen)
+wt1 = tci
+wt2 = ta.sma(wt1, wtMALen)
+
+// Signal Green Dot (Petit point vert) : Croisement haussier en zone de survente
+greenDot = ta.crossover(wt1, wt2) and wt2 < osLevel
+
+// --- B. Calcul EMA 200 ---
+ema200 = ta.ema(close, maLength)
+distToEma = math.abs(low - ema200) / ema200 * 100
+
+// --- C. Calcul Structure (Auto-Fibs) ---
+// Détection des pivots
+ph = ta.pivothigh(high, pivotLeft, pivotRight)
+pl = ta.pivotlow(low, pivotLeft, pivotRight)
+
+// Variables pour stocker les derniers niveaux valides
+var float swingHigh = na
+var float swingLow = na
+var float lastHighVal = na
+var float lastLowVal = na
+
+// Mise à jour des pivots
+if not na(ph)
+    swingHigh := ph
+    lastHighVal := ph
+    lastHighVal
+if not na(pl)
+    swingLow := pl
+    lastLowVal := pl
+    lastLowVal
+
+// Calcul des niveaux Fibonacci basés sur le range actuel
+// Condition: Il faut une structure haussière (Swing High > Swing Low) pour tracer un retracement d'achat
+isValidStructure = not na(swingHigh) and not na(swingLow) and swingHigh > swingLow
+
+// Niveaux de Prix Fibonacci
+range_price = swingHigh - swingLow
+price_fib05 = swingHigh - range_price * fib05
+price_fib618 = swingHigh - range_price * fib618
+price_tp1 = swingHigh // Niveau 0.0
+price_tp2 = swingHigh + range_price * 0.272 // Extension -0.272 (Note: formule mathématique inversée pour extension vers le haut)
+// Stop Loss sous le Swing Low (Niveau 1.0) ou Fixe
+price_sl_structure = swingLow
+
+// ==========================================
+// 3. LOGIQUE DE TRADING (CONFLUENCE)
+// ==========================================
+
+// Condition 1: Tendance (Prix au-dessus de l'EMA 200)
+trendCondition = close > ema200
+
+// Condition 1b: Proximité (Optionnel)
+proxCondition = useMaProximity ? distToEma <= maProximityPct : true
+
+// Condition 2: Structure (Kill Zone)
+// Le plus bas de la bougie actuelle est entré dans la zone 0.5 - 0.618
+// Ou est en dessous du 0.5 (nous voulons acheter le dip, donc être "moins cher" que le 50%)
+inKillZone = isValidStructure and low <= price_fib05 and low >= swingLow // Doit être au dessus du Low précédent quand même
+
+// Condition 3: Trigger (Vumanchu)
+triggerCondition = greenDot
+
+// --- Exécution ---
+longCondition = trendCondition and proxCondition and inKillZone and triggerCondition
+
+if longCondition
+    // Calcul du Stop Loss selon le mode choisi
+    float sl_price = na
+    if sl_mode == 'Swing Low'
+        sl_price := price_sl_structure
+        sl_price
+    else
+        sl_price := close * (1 - sl_fixed_pct / 100)
+        sl_price
+
+    // ID unique pour le trade basé sur l'index de la bougie
+    tradeId = 'Long_' + str.tostring(bar_index)
+
+    strategy.entry('Long', strategy.long, comment = 'Trinity Entry')
+
+    // Sorties
+    // TP1: Sortie partielle à 50% sur le sommet précédent
+    strategy.exit('TP1', 'Long', qty_percent = 50, limit = price_tp1, stop = sl_price, comment_profit = 'TP1 Hit', comment_loss = 'SL Hit')
+    // TP2: Sortie du reste sur l'extension
+    strategy.exit('TP2', 'Long', qty_percent = 100, limit = price_tp2, stop = sl_price, comment_profit = 'TP2 Hit', comment_loss = 'SL Hit')
+
+// ==========================================
+// 4. VISUELS
+// ==========================================
+
+// Tracer l'EMA
+plot(ema200, 'EMA 200', color = color.white, linewidth = 2)
+
+// Tracer les Fibs (uniquement si structure valide)
+// On utilise line.new pour ne pas surcharger le graphique historique, mais plot est plus simple pour debug
+// Ici on utilise plot pour visualiser les niveaux actuels en temps réel
+plot(isValidStructure ? price_fib05 : na, 'Fib 0.5', color = color.new(color.yellow, 50), style = plot.style_circles)
+plot(isValidStructure ? price_fib618 : na, 'Fib 0.618', color = color.new(color.orange, 50), style = plot.style_circles)
+
+// Colorer le fond quand on est dans la Kill Zone Fibonacci
+bgcolor(inKillZone ? color.new(color.green, 90) : na, title = 'In Kill Zone')
+
+// Marquer les signaux d'achat
+plotshape(longCondition, title = 'Buy Signal', style = shape.triangleup, location = location.belowbar, color = color.green, size = size.small, text = 'TRINITY')
+
+// Visualisation WaveTrend (Optionnel pour debug, désactivé par défaut)
+// plot(wt1, "WT1", color=color.green, display=display.none)
+// plot(wt2, "WT2", color=color.red, display=display.none)

@@ -1,0 +1,140 @@
+//@version=6
+strategy("VMC Strat Flex Corrected", shorttitle="VMC Fixed", overlay=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, currency=currency.USD)
+
+// ==========================================
+// 1. SETTINGS
+// ==========================================
+
+// --- WaveTrend ---
+grp_wt = "1. WaveTrend Settings"
+wtChannelLen = input.int(9, "WT Channel Length", group=grp_wt)
+wtAverageLen = input.int(12, "WT Average Length", group=grp_wt)
+wtMALen = input.int(3, "WT MA Length", group=grp_wt)
+// Note: J'ai remonté un peu le niveau par défaut (-53 au lieu de -60) pour attraper plus de trades
+wtBuyLevel = input.int(-53, "WT Buy Level (Must be below)", group=grp_wt) 
+wtSellLevel = input.int(20, "WT Exit Level (Must be above)", group=grp_wt)
+
+// --- RSI & Stoch ---
+grp_osc = "2. RSI & Stochastic"
+rsiLen = input.int(14, "RSI Length", group=grp_osc)
+rsiBuyLevel = input.int(35, "RSI Buy Level (<)", group=grp_osc) // Assoupli à 35
+stochLen = input.int(14, "Stoch RSI Length", group=grp_osc)
+stochBuyLevel = input.int(20, "Stoch Buy Level (<)", group=grp_osc) // Assoupli à 20
+stochExitLevel = input.float(95.0, "Stoch Exit Threshold (>)", group=grp_osc) // Assoupli à 95
+stochExitLookback = input.int(5, "Stoch Exit Lookback", group=grp_osc)
+
+// --- MFI ---
+grp_mfi = "3. Money Flow Index (MFI)"
+mfiPeriod = input.int(60, "MFI Period", group=grp_mfi)
+mfiMultiplier = input.float(150.0, "MFI Area Multiplier", group=grp_mfi)
+mfiLookback = input.int(12, "MFI Low Lookback", group=grp_mfi)
+mfiTolerance = input.int(30, "MFI Low Tolerance (%)", group=grp_mfi) // Augmenté à 30% pour tolérer des creux plus larges
+
+// --- Divergences ---
+grp_div = "4. Divergences"
+useDivCondition = input.bool(false, "Require Regular Divergence?", group=grp_div)
+wtDivOSLevel = input.int(-60, "WT Bullish Div Min", group=grp_div)
+
+// ==========================================
+// 2. CALCULS
+// ==========================================
+
+// RSI
+rsiVal = ta.rsi(close, rsiLen)
+
+// WaveTrend
+ap = hlc3
+esa = ta.ema(ap, wtChannelLen)
+d = ta.ema(math.abs(ap - esa), wtChannelLen)
+ci = (ap - esa) / (0.015 * d)
+wt1 = ta.ema(ci, wtAverageLen) 
+wt2 = ta.sma(wt1, wtMALen)     
+
+// MFI (Vumanchu)
+mfiRaw = ((close - open) / (high - low)) * mfiMultiplier
+mfiVal = ta.sma(mfiRaw, mfiPeriod) - 2.5 
+
+// Stochastique
+stochRSI = ta.rsi(close, stochLen)
+stochK = ta.sma(ta.stoch(stochRSI, stochRSI, stochRSI, stochLen), 3)
+
+// ==========================================
+// 3. LOGIQUE DIVERGENCE (CORRIGÉE)
+// ==========================================
+
+// Définitions des fractales
+f_top_fractal(src) => src[4] < src[2] and src[3] < src[2] and src[2] > src[1] and src[2] > src[0]
+f_bot_fractal(src) => src[4] > src[2] and src[3] > src[2] and src[2] < src[1] and src[2] < src[0]
+
+// Correction ici : On extrait les appels de l'opérateur ternaire
+f_fractalize(src) => 
+    isTop = f_top_fractal(src)
+    isBot = f_bot_fractal(src)
+    isTop ? 1 : isBot ? -1 : 0
+
+f_findBullDiv(src, limit) =>
+    fractalVal = f_fractalize(src) // Appel propre
+    fractalBot = fractalVal == -1 and src[2] <= limit
+    lowPrev = ta.valuewhen(fractalBot, src[2], 1) 
+    lowPrice = ta.valuewhen(fractalBot, low[2], 1) 
+    bullSignal = fractalBot and low[2] < lowPrice and src[2] > lowPrev
+    bullSignal
+
+isBullDivDetected = f_findBullDiv(wt2, wtDivOSLevel)
+
+// ==========================================
+// 4. CONDITIONS D'ENTRÉE
+// ==========================================
+
+// WT
+wtCrossUp = ta.crossover(wt1, wt2)
+cond_wt_level = wt2 < wtBuyLevel
+
+// MFI (Arrondi)
+mfi_is_negative = mfiVal < 0
+mfi_lowest = ta.lowest(mfiVal, mfiLookback)
+mfi_highest = ta.highest(mfiVal, mfiLookback)
+mfi_range = mfi_highest - mfi_lowest
+mfi_threshold = mfi_lowest + (mfi_range * (mfiTolerance / 100))
+
+cond_mfi_rising = mfiVal > mfiVal[1] 
+cond_mfi_near_low = mfiVal <= mfi_threshold
+cond_mfi_shape = mfi_is_negative and cond_mfi_rising and cond_mfi_near_low
+
+// Oscillateurs
+cond_stoch = stochK < stochBuyLevel
+cond_rsi = rsiVal < rsiBuyLevel
+
+// Divergence
+cond_div = not useDivCondition or (useDivCondition and (isBullDivDetected or isBullDivDetected[1] or isBullDivDetected[2]))
+
+// --- SIGNAL FINAL ---
+longCondition = wtCrossUp and cond_wt_level and cond_mfi_shape and cond_stoch and cond_rsi and cond_div
+
+// ==========================================
+// 5. SORTIE & VISUELS
+// ==========================================
+
+wtCrossDown = ta.crossunder(wt1, wt2)
+cond_wt_exit_level = wt2 > wtSellLevel
+stoch_was_high = ta.highest(stochK, stochExitLookback) > stochExitLevel
+
+exitCondition = wtCrossDown and cond_wt_exit_level and stoch_was_high
+
+// Execution
+if longCondition
+    strategy.entry("Long", strategy.long, comment="Entry")
+
+if exitCondition
+    strategy.close("Long", comment="Exit")
+
+// Plotting
+plot(wt1, "WT1", color=color.new(color.green, 50))
+plot(wt2, "WT2", color=color.new(color.red, 50))
+hline(wtBuyLevel, "Buy Lvl", color=color.gray, linestyle=hline.style_dotted)
+hline(wtSellLevel, "Sell Lvl", color=color.gray, linestyle=hline.style_dotted)
+
+// Markers (Uniquement si pertinent)
+// On n'affiche le SELL que si on a une position ouverte
+plotshape(longCondition, style=shape.circle, location=location.belowbar, color=color.green, size=size.small, title="Long")
+plotshape(exitCondition and strategy.position_size > 0, style=shape.circle, location=location.abovebar, color=color.red, size=size.small, title="Exit")

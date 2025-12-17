@@ -1,0 +1,118 @@
+//@version=6
+strategy("VMC Strat Hybrid Trend", shorttitle="VMC Hybrid", overlay=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, currency=currency.USD) // J'ai mis 100% equity pour tester le plein potentiel
+
+// ==========================================
+// 1. SETTINGS
+// ==========================================
+
+// --- Trend Filter (NOUVEAU) ---
+grp_trend = "0. Trend Filter (Hybrid Logic)"
+useTrendFilter = input.bool(true, "Use EMA Trend Filter?", group=grp_trend)
+emaLen = input.int(200, "EMA Length", group=grp_trend)
+wtBuyLevelBull = input.int(-30, "WT Buy Level in Bull Market (> EMA)", group=grp_trend) // Plus agressif
+wtBuyLevelBear = input.int(-60, "WT Buy Level in Bear Market (< EMA)", group=grp_trend) // Plus prudent
+
+// --- WaveTrend ---
+grp_wt = "1. WaveTrend Settings"
+wtChannelLen = input.int(9, "WT Channel Length", group=grp_wt)
+wtAverageLen = input.int(12, "WT Average Length", group=grp_wt)
+wtMALen = input.int(3, "WT MA Length", group=grp_wt)
+wtSellLevel = input.int(20, "WT Exit Level", group=grp_wt)
+
+// --- RSI & Stoch ---
+grp_osc = "2. RSI & Stochastic"
+rsiLen = input.int(14, "RSI Length", group=grp_osc)
+// On utilise une valeur plus large ici car le filtre de tendance gère le risque
+rsiBuyLevel = input.int(50, "RSI Buy Level (<)", group=grp_osc) 
+stochLen = input.int(14, "Stoch RSI Length", group=grp_osc)
+stochBuyLevel = input.int(25, "Stoch Buy Level (<)", group=grp_osc) 
+stochExitLevel = input.float(90.0, "Stoch Exit Threshold (>)", group=grp_osc) 
+stochExitLookback = input.int(5, "Stoch Exit Lookback", group=grp_osc)
+
+// --- MFI ---
+grp_mfi = "3. Money Flow Index"
+mfiPeriod = input.int(60, "MFI Period", group=grp_mfi)
+mfiMultiplier = input.float(150.0, "MFI Multiplier", group=grp_mfi)
+// J'ai simplifié la condition MFI pour l'hybride : on veut juste du momentum
+useMfiStrict = input.bool(false, "Use Strict MFI Rounded Bottom?", group=grp_mfi, tooltip="If false, just checks if MFI is rising")
+
+// ==========================================
+// 2. CALCULS
+// ==========================================
+
+// Trend EMA
+emaTrend = ta.ema(close, emaLen)
+isBullish = close > emaTrend
+
+// RSI & Stoch
+rsiVal = ta.rsi(close, rsiLen)
+stochRSI = ta.rsi(close, stochLen)
+stochK = ta.sma(ta.stoch(stochRSI, stochRSI, stochRSI, stochLen), 3)
+
+// WaveTrend
+ap = hlc3
+esa = ta.ema(ap, wtChannelLen)
+d = ta.ema(math.abs(ap - esa), wtChannelLen)
+ci = (ap - esa) / (0.015 * d)
+wt1 = ta.ema(ci, wtAverageLen) 
+wt2 = ta.sma(wt1, wtMALen)     
+
+// MFI
+mfiRaw = ((close - open) / (high - low)) * mfiMultiplier
+mfiVal = ta.sma(mfiRaw, mfiPeriod) - 2.5 
+
+// ==========================================
+// 3. LOGIQUE DYNAMIQUE
+// ==========================================
+
+// Déterminer le niveau d'achat WaveTrend en fonction de la tendance
+currentWtBuyLevel = useTrendFilter ? (isBullish ? wtBuyLevelBull : wtBuyLevelBear) : wtBuyLevelBear
+
+// 1. WT Crossover
+wtCrossUp = ta.crossover(wt1, wt2)
+cond_wt_level = wt2 < currentWtBuyLevel
+
+// 2. MFI Logic (Simplifiée ou Stricte selon choix)
+cond_mfi = false
+if useMfiStrict
+    // Logique stricte précédente
+    mfi_lowest = ta.lowest(mfiVal, 12)
+    mfi_range = ta.highest(mfiVal, 12) - mfi_lowest
+    mfi_threshold = mfi_lowest + (mfi_range * 0.30)
+    cond_mfi := mfiVal < 0 and mfiVal > mfiVal[1] and mfiVal <= mfi_threshold
+else
+    // Logique souple : Le MFI doit juste remonter (momentum acheteur)
+    cond_mfi := mfiVal > mfiVal[1]
+
+// 3. Oscillateurs (RSI assoupli dynamiquement si Bullish ?)
+// Pour l'instant on garde le niveau fixe mais plus haut (50)
+cond_stoch = stochK < stochBuyLevel
+cond_rsi = rsiVal < rsiBuyLevel
+
+// --- SIGNAL FINAL ---
+longCondition = wtCrossUp and cond_wt_level and cond_mfi and cond_stoch and cond_rsi
+
+// ==========================================
+// 4. SORTIE & VISUELS
+// ==========================================
+
+wtCrossDown = ta.crossunder(wt1, wt2)
+cond_wt_exit_level = wt2 > wtSellLevel
+stoch_was_high = ta.highest(stochK, stochExitLookback) > stochExitLevel
+
+exitCondition = wtCrossDown and cond_wt_exit_level and stoch_was_high
+
+// Execution
+if longCondition
+    strategy.entry("Long", strategy.long, comment=isBullish ? "Bull Entry" : "Sniper Entry")
+
+if exitCondition
+    strategy.close("Long", comment="Exit")
+
+// Plotting
+plot(wt1, "WT1", color=color.new(color.green, 50))
+plot(wt2, "WT2", color=color.new(color.red, 50))
+plot(emaTrend, "EMA 200", color=color.orange, display=display.pane) // Affiche l'EMA sur le graph principal
+
+// Visualisation du niveau dynamique
+plot(currentWtBuyLevel, "Dynamic Buy Level", color=color.blue, style=plot.style_stepline)

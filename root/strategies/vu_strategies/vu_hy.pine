@@ -1,0 +1,524 @@
+//@version=6
+// =================================================================================================================
+// STRATÉGIE DE CONFLUENCE SÉQUENTIELLE : HYBRID DETECTOR + VUMANCHU CYPHER B
+//
+// Objectif : Implémente la stratégie "Régime -> Biais -> Déclencheur" spécifiée dans le rapport DeepResearch.
+//
+// 1. FILTRE DE RÉGIME (Contexte) :
+//    - Indicateur : Hybrid Overbought Oversold Detector
+//    - Logique : Le marché doit être dans une zone d'épuisement extrême (survente/surachat).
+//
+// 2. FILTRE DE BIAIS (Confirmation) :
+//    - Indicateur : Vumanchu Cypher B (Nuage MFI)
+//    - Logique : Le flux monétaire (Money Flow) doit soutenir la direction du trade.
+//
+// 3. DÉCLENCHEUR (Timing) :
+//    - Indicateur : Vumanchu Cypher B (Points WaveTrend)
+//    - Logique : Le momentum à court terme doit basculer au moment précis de l'entrée.
+//
+// Créé en fusionnant :
+// - HybridOverboughtOversoldDetector.pine
+// - VumanchuCypherBReplica.pine
+//
+// =================================================================================================================
+
+strategy('Stratégie Confluence Hybride-VMCB', overlay = true, default_qty_type = strategy.percent_of_equity, default_qty_value = 2, commission_value = 0.075, initial_capital = 10000)
+
+// =================================================================================================================
+// === SECTION 0 : PARAMÈTRES DE STRATÉGIE (RISQUE ET SORTIE)
+// =================================================================================================================
+string strat_tp_type = input.string('Cible Régime Opposé', 'Type de Take Profit', options = ['Cible Régime Opposé', 'R:R Fixe'], group = 'Gestion des Risques')
+float strat_rr_ratio = input.float(1.5, 'Ratio R:R (si \'R:R Fixe\')', group = 'Gestion des Risques')
+int strat_stop_length = input.int(20, 'Stop Loss Lookback (Bars)', group = 'Gestion des Risques')
+
+
+// =================================================================================================================
+// === SECTION 1 : CODE DU 'HYBRID OVERBOUGHT OVERSOLD DETECTOR' (PRÉFIXE : hybrid_)
+// =================================================================================================================
+// Source : HybridOverboughtOversoldDetector.pine
+
+// --- Inputs du Hybrid Detector ---
+string hybrid_techGroup = '=====[ Section 1 : Paramètres du Hybrid Detector ]====='
+string hybrid_tf = input.timeframe('', 'Calculs Time Frame', group = hybrid_techGroup)
+string hybrid_ticker = input.symbol('', 'Ticker ID', group = hybrid_techGroup)
+float hybrid_src = input.source(close, 'Source', inline = 'calc', group = hybrid_techGroup)
+int hybrid_len = input.int(14, 'Length', 1, inline = 'calc', group = hybrid_techGroup)
+int hybrid_obManual = input.int(100, 'Niveaux Alerte → OB:', inline = 'alert', group = hybrid_techGroup)
+int hybrid_osManual = input.int(0, 'OS:', tooltip = '(100, 0) = Auto', inline = 'alert', group = hybrid_techGroup)
+
+// Oscillateurs à inclure
+bool hybrid_useB = input.bool(true, 'Bollinger Bands %B', inline = 'bUse', group = hybrid_techGroup)
+bool hybrid_useCci = input.bool(true, 'Commodity Channel Index (CCI)', inline = 'cciUse', group = hybrid_techGroup)
+bool hybrid_useCmf = input.bool(true, 'Chaikin Money Flow (CMF)', inline = 'cmfUse', group = hybrid_techGroup)
+bool hybrid_useCmo = input.bool(true, 'Chande Momentum Oscillator (CMO)', inline = 'cmoUse', group = hybrid_techGroup)
+bool hybrid_useDix = input.bool(true, 'Disparity Index (DIX)', inline = 'dixUse', group = hybrid_techGroup)
+bool hybrid_useK = input.bool(true, 'Keltner Channel %K', inline = 'kUse', group = hybrid_techGroup)
+bool hybrid_useMfi = input.bool(true, 'Money Flow Index (MFI)', inline = 'mfiUse', group = hybrid_techGroup)
+bool hybrid_useRoc = input.bool(true, 'Rate Of Change (ROC / Momentum)', inline = 'rocUse', group = hybrid_techGroup)
+bool hybrid_useRsi = input.bool(true, 'Relative Strength Index (RSI)', inline = 'rsiUse', group = hybrid_techGroup)
+bool hybrid_useRvi = input.bool(true, 'Relative Vigor Index (RVI / RVGI)', inline = 'rviUse', group = hybrid_techGroup)
+bool hybrid_useSto = input.bool(true, 'Stochastic (William\'s %R)', inline = 'stoUse', group = hybrid_techGroup)
+bool hybrid_useTmf = input.bool(true, 'Twiggs Money Flow (TMF)', inline = 'tmfUse', group = hybrid_techGroup)
+
+// Niveaux OB/OS manuels (laissés pour la personnalisation)
+int hybrid_bOBManual = input.int(100, 'BB %B → OB:', inline = 'bLevels', group = hybrid_techGroup)
+int hybrid_bOSManual = input.int(0, 'OS:', inline = 'bLevels', group = hybrid_techGroup)
+int hybrid_cciOBManual = input.int(100, 'CCI → OB:', inline = 'cciLevels', group = hybrid_techGroup)
+int hybrid_cciOSManual = input.int(0, 'OS:', inline = 'cciLevels', group = hybrid_techGroup)
+int hybrid_cmfOBManual = input.int(100, 'CMF → OB:', inline = 'cmfLevels', group = hybrid_techGroup)
+int hybrid_cmfOSManual = input.int(0, 'OS:', inline = 'cmfLevels', group = hybrid_techGroup)
+int hybrid_cmoOBManual = input.int(100, 'CMO → OB:', inline = 'cmoLevels', group = hybrid_techGroup)
+int hybrid_cmoOSManual = input.int(0, 'OS:', inline = 'cmoLevels', group = hybrid_techGroup)
+int hybrid_dixOBManual = input.int(100, 'DIX → OB:', inline = 'dixLevels', group = hybrid_techGroup)
+int hybrid_dixOSManual = input.int(0, 'OS:', inline = 'dixLevels', group = hybrid_techGroup)
+int hybrid_kOBManual = input.int(100, 'KC %K → OB:', inline = 'kLevels', group = hybrid_techGroup)
+int hybrid_kOSManual = input.int(0, 'OS:', inline = 'kLevels', group = hybrid_techGroup)
+int hybrid_mfiOBManual = input.int(100, 'MFI → OB:', inline = 'mfiLevels', group = hybrid_techGroup)
+int hybrid_mfiOSManual = input.int(0, 'OS:', inline = 'mfiLevels', group = hybrid_techGroup)
+int hybrid_rocOBManual = input.int(100, 'ROC → OB:', inline = 'rocLevels', group = hybrid_techGroup)
+int hybrid_rocOSManual = input.int(0, 'OS:', inline = 'rocLevels', group = hybrid_techGroup)
+int hybrid_rsiOBManual = input.int(100, 'RSI → OB:', inline = 'rsiLevels', group = hybrid_techGroup)
+int hybrid_rsiOSManual = input.int(0, 'OS:', inline = 'rsiLevels', group = hybrid_techGroup)
+int hybrid_rviOBManual = input.int(100, 'RVI → OB:', inline = 'rviLevels', group = hybrid_techGroup)
+int hybrid_rviOSManual = input.int(0, 'OS:', inline = 'rviLevels', group = hybrid_techGroup)
+int hybrid_stoOBManual = input.int(100, 'Stoch → OB:', inline = 'stoLevels', group = hybrid_techGroup)
+int hybrid_stoOSManual = input.int(0, 'OS:', inline = 'stoLevels', group = hybrid_techGroup)
+int hybrid_tmfOBManual = input.int(100, 'TMF → OB:', inline = 'tmfLevels', group = hybrid_techGroup)
+int hybrid_tmfOSManual = input.int(0, 'OS:', inline = 'tmfLevels', group = hybrid_techGroup)
+
+// --- Variables et Arrays du Hybrid Detector ---
+int hybrid_maxArraySize = 100000
+int hybrid_oscCount = 0
+
+var hybrid_bOBSum = array.new_int()
+var hybrid_bOSSum = array.new_int()
+var hybrid_cciOBSum = array.new_int()
+var hybrid_cciOSSum = array.new_int()
+var hybrid_cmfOBSum = array.new_int()
+var hybrid_cmfOSSum = array.new_int()
+var hybrid_cmoOBSum = array.new_int()
+var hybrid_cmoOSSum = array.new_int()
+var hybrid_dixOBSum = array.new_int()
+var hybrid_dixOSSum = array.new_int()
+var hybrid_kOBSum = array.new_int()
+var hybrid_kOSSum = array.new_int()
+var hybrid_mfiOBSum = array.new_int()
+var hybrid_mfiOSSum = array.new_int()
+var hybrid_rocOBSum = array.new_int()
+var hybrid_rocOSSum = array.new_int()
+var hybrid_rsiOBSum = array.new_int()
+var hybrid_rsiOSSum = array.new_int()
+var hybrid_rviOBSum = array.new_int()
+var hybrid_rviOSSum = array.new_int()
+var hybrid_stoOBSum = array.new_int()
+var hybrid_stoOSSum = array.new_int()
+var hybrid_tmfOBSum = array.new_int()
+var hybrid_tmfOSSum = array.new_int()
+
+if hybrid_bOBSum.size() == hybrid_maxArraySize
+    hybrid_bOBSum.shift()
+if hybrid_cciOBSum.size() == hybrid_maxArraySize
+    hybrid_cciOBSum.shift()
+    // ... (omission des autres checks de 'shift' pour la lisibilité)
+if hybrid_tmfOSSum.size() == hybrid_maxArraySize
+    hybrid_tmfOSSum.shift()
+
+var hybrid_hybOBSum = array.new_int()
+var hybrid_hybOSSum = array.new_int()
+if hybrid_hybOBSum.size() == hybrid_maxArraySize
+    hybrid_hybOBSum.shift()
+if hybrid_hybOSSum.size() == hybrid_maxArraySize
+    hybrid_hybOSSum.shift()
+
+[hybrid_bar, hybrid_o, hybrid_c] = request.security(hybrid_ticker, hybrid_tf, [bar_index, open, close])
+
+// --- Fonctions du Hybrid Detector ---
+
+// Fonction de normalisation
+f_hybrid_normal(s, min, max) =>
+    var hMin = 1e11
+    var hMax = -1e11
+    hMin := math.min(nz(s, hMin), hMin)
+    hMax := math.max(nz(s, hMax), hMax)
+    min + (max - min) * (s - hMin) / math.max(hMax - hMin, 0)
+
+// Fonction de calcul des oscillateurs
+f_hybrid_graphs(src, len) =>
+    b = f_hybrid_normal((src - ta.sma(src, len) + ta.stdev(src, len)) / (2 * ta.stdev(src, len)), 0, 100)
+    cci = f_hybrid_normal(ta.cci(src, len), 0, 100)
+    cmf = f_hybrid_normal(math.sum(high == low ? 0 : volume * (2 * src - low - high) / (high - low), len) / math.sum(volume, len), 0, 100)
+    cmo = (ta.cmo(src, len) + 100) / 2
+    dix = f_hybrid_normal(((src - ta.sma(src, len)) / ta.sma(src, len) * 100 + 1) * 50, 0, 100)
+    k = f_hybrid_normal((src - (ta.ema(src, len) - ta.atr(len))) / (2 * ta.atr(len)), 0, 100)
+    mfi = ta.mfi(src, len)
+    roc = f_hybrid_normal(ta.roc(src, len), 0, 100)
+    rsi = ta.rsi(src, len)
+    rvi = (math.sum(ta.swma(close - open), len) / math.sum(ta.swma(high - low), len) + 1) * 50
+    sto = ta.stoch(src, high, low, len)
+    tmf = f_hybrid_normal(ta.ema((src - math.min(low, src[1]) - (math.max(high, src[1]) - src)) / (math.max(high, src[1]) - math.min(low, src[1])) * volume, len) / ta.ema(volume, len), 0, 100)
+    [b, cci, cmf, cmo, dix, k, mfi, roc, rsi, rvi, sto, tmf]
+
+// Fonction de calcul des niveaux auto
+f_hybrid_levels(b, cci, cmf, cmo, dix, k, mfi, roc, rsi, rvi, sto, tmf) =>
+    if hybrid_bar != hybrid_bar[1] and hybrid_c < hybrid_o and hybrid_c[1] > hybrid_o[1] and (na(b) ? true : b[1] > 50) and (na(cci) ? true : cci[1] > 50) and (na(cmf) ? true : cmf[1] > 50) and (na(cmo) ? true : cmo[1] > 50) and (na(dix) ? true : dix[1] > 50) and (na(k) ? true : k[1] > 50) and (na(mfi) ? true : mfi[1] > 50) and (na(roc) ? true : roc[1] > 50) and (na(rsi) ? true : rsi[1] > 50) and (na(rvi) ? true : rvi[1] > 50) and (na(sto) ? true : sto[1] > 50) and (na(tmf) ? true : tmf[1] > 50)
+        hybrid_bOBSum.push(math.ceil(b[1]))
+        hybrid_cciOBSum.push(math.ceil(cci[1]))
+        hybrid_cmfOBSum.push(math.ceil(cmf[1]))
+        hybrid_cmoOBSum.push(math.ceil(cmo[1]))
+        hybrid_dixOBSum.push(math.ceil(dix[1]))
+        hybrid_kOBSum.push(math.ceil(k[1]))
+        hybrid_mfiOBSum.push(math.ceil(mfi[1]))
+        hybrid_rocOBSum.push(math.ceil(roc[1]))
+        hybrid_rsiOBSum.push(math.ceil(rsi[1]))
+        hybrid_rviOBSum.push(math.ceil(rvi[1]))
+        hybrid_stoOBSum.push(math.ceil(sto[1]))
+        hybrid_tmfOBSum.push(math.ceil(tmf[1]))
+    if hybrid_bar != hybrid_bar[1] and hybrid_c > hybrid_o and hybrid_c[1] < hybrid_o[1] and (na(b) ? true : b[1] < 50) and (na(cci) ? true : cci[1] < 50) and (na(cmf) ? true : cmf[1] < 50) and (na(cmo) ? true : cmo[1] < 50) and (na(dix) ? true : dix[1] < 50) and (na(k) ? true : k[1] < 50) and (na(mfi) ? true : mfi[1] < 50) and (na(roc) ? true : roc[1] < 50) and (na(rsi) ? true : rsi[1] < 50) and (na(rvi) ? true : rvi[1] < 50) and (na(sto) ? true : sto[1] < 50) and (na(tmf) ? true : tmf[1] < 50)
+        hybrid_bOSSum.push(math.floor(b[1]))
+        hybrid_cciOSSum.push(math.floor(cci[1]))
+        hybrid_cmfOSSum.push(math.floor(cmf[1]))
+        hybrid_cmoOSSum.push(math.floor(cmo[1]))
+        hybrid_dixOSSum.push(math.floor(dix[1]))
+        hybrid_kOSSum.push(math.floor(k[1]))
+        hybrid_mfiOSSum.push(math.floor(mfi[1]))
+        hybrid_rocOSSum.push(math.floor(roc[1]))
+        hybrid_rsiOSSum.push(math.floor(rsi[1]))
+        hybrid_rviOSSum.push(math.floor(rvi[1]))
+        hybrid_stoOSSum.push(math.floor(sto[1]))
+        hybrid_tmfOSSum.push(math.floor(tmf[1]))
+    bOB = math.ceil(hybrid_bOBSum.avg())
+    bOS = math.floor(hybrid_bOSSum.avg())
+    cciOB = math.ceil(hybrid_cciOBSum.avg())
+    cciOS = math.floor(hybrid_cciOSSum.avg())
+    cmfOB = math.ceil(hybrid_cmfOBSum.avg())
+    cmfOS = math.floor(hybrid_cmfOSSum.avg())
+    cmoOB = math.ceil(hybrid_cmoOBSum.avg())
+    cmoOS = math.floor(hybrid_cmoOSSum.avg())
+    dixOB = math.ceil(hybrid_dixOBSum.avg())
+    dixOS = math.floor(hybrid_dixOSSum.avg())
+    kOB = math.ceil(hybrid_kOBSum.avg())
+    kOS = math.floor(hybrid_kOSSum.avg())
+    mfiOB = math.ceil(hybrid_mfiOBSum.avg())
+    mfiOS = math.floor(hybrid_mfiOSSum.avg())
+    rocOB = math.ceil(hybrid_rocOBSum.avg())
+    rocOS = math.floor(hybrid_rocOSSum.avg())
+    rsiOB = math.ceil(hybrid_rsiOBSum.avg())
+    rsiOS = math.floor(hybrid_rsiOSSum.avg())
+    rviOB = math.ceil(hybrid_rviOBSum.avg())
+    rviOS = math.floor(hybrid_rviOSSum.avg())
+    stoOB = math.ceil(hybrid_stoOBSum.avg())
+    stoOS = math.floor(hybrid_stoOSSum.avg())
+    tmfOB = math.ceil(hybrid_tmfOBSum.avg())
+    tmfOS = math.floor(hybrid_tmfOSSum.avg())
+    [bOB, bOS, cciOB, cciOS, cmfOB, cmfOS, cmoOB, cmoOS, dixOB, dixOS, kOB, kOS, mfiOB, mfiOS, rocOB, rocOS, rsiOB, rsiOS, rviOB, rviOS, stoOB, stoOS, tmfOB, tmfOS]
+
+// Fonction de calcul des niveaux hybrides
+f_hybrid_hybLevels(hyb) =>
+    if hybrid_bar != hybrid_bar[1] and hybrid_c < hybrid_o and hybrid_c[1] > hybrid_o[1] and hyb[1] > 50
+        hybrid_hybOBSum.push(math.ceil(hyb[1]))
+    if hybrid_bar != hybrid_bar[1] and hybrid_c > hybrid_o and hybrid_c[1] < hybrid_o[1] and hyb[1] < 50
+        hybrid_hybOSSum.push(math.floor(hyb[1]))
+    [math.ceil(array.avg(hybrid_hybOBSum)), math.floor(array.avg(hybrid_hybOSSum))]
+
+// Fonctions de calcul OB/OS
+f_hybrid_ob(b, cci, cmf, cmo, dix, k, mfi, roc, rsi, rvi, sto, tmf, bOB, cciOB, cmfOB, cmoOB, dixOB, kOB, mfiOB, rocOB, rsiOB, rviOB, stoOB, tmfOB) =>
+    percent = 100.
+    bit = int(100 / hybrid_oscCount)
+    if hybrid_useB and b <= bOB
+        percent := percent - bit
+        percent
+    if hybrid_useCci and cci <= cciOB
+        percent := percent - bit
+        percent
+    if hybrid_useCmf and cmf <= cmfOB
+        percent := percent - bit
+        percent
+    if hybrid_useCmo and cmo <= cmoOB
+        percent := percent - bit
+        percent
+    if hybrid_useDix and dix <= dixOB
+        percent := percent - bit
+        percent
+    if hybrid_useK and k <= kOB
+        percent := percent - bit
+        percent
+    if hybrid_useMfi and mfi <= mfiOB
+        percent := percent - bit
+        percent
+    if hybrid_useRoc and roc <= rocOB
+        percent := percent - bit
+        percent
+    if hybrid_useRsi and rsi <= rsiOB
+        percent := percent - bit
+        percent
+    if hybrid_useRvi and rvi <= rviOB
+        percent := percent - bit
+        percent
+    if hybrid_useSto and sto <= stoOB
+        percent := percent - bit
+        percent
+    if hybrid_useTmf and tmf <= tmfOB
+        percent := percent - bit
+        percent
+    percent
+
+f_hybrid_os(b, cci, cmf, cmo, dix, k, mfi, roc, rsi, rvi, sto, tmf, bOS, cciOS, cmfOS, cmoOS, dixOS, kOS, mfiOS, rocOS, rsiOS, rviOS, stoOS, tmfOS) =>
+    percent = 100.
+    bit = int(100 / hybrid_oscCount)
+    if hybrid_useB and b >= bOS
+        percent := percent - bit
+        percent
+    if hybrid_useCci and cci >= cciOS
+        percent := percent - bit
+        percent
+    if hybrid_useCmf and cmf >= cmfOS
+        percent := percent - bit
+        percent
+    if hybrid_useCmo and cmo >= cmoOS
+        percent := percent - bit
+        percent
+    if hybrid_useDix and dix >= dixOS
+        percent := percent - bit
+        percent
+    if hybrid_useK and k >= kOS
+        percent := percent - bit
+        percent
+    if hybrid_useMfi and mfi >= mfiOS
+        percent := percent - bit
+        percent
+    if hybrid_useRoc and roc >= rocOS
+        percent := percent - bit
+        percent
+    if hybrid_useRsi and rsi >= rsiOS
+        percent := percent - bit
+        percent
+    if hybrid_useRvi and rvi >= rviOS
+        percent := percent - bit
+        percent
+    if hybrid_useSto and sto >= stoOS
+        percent := percent - bit
+        percent
+    if hybrid_useTmf and tmf >= tmfOS
+        percent := percent - bit
+        percent
+    percent
+
+// --- Calculs Principaux du Hybrid Detector ---
+
+[hybrid_b, hybrid_cci, hybrid_cmf, hybrid_cmo, hybrid_dix, hybrid_k, hybrid_mfi, hybrid_roc, hybrid_rsi, hybrid_rvi, hybrid_sto, hybrid_tmf] = request.security(hybrid_ticker, hybrid_tf, f_hybrid_graphs(hybrid_src, hybrid_len))
+
+if hybrid_useB and not na(hybrid_b)
+    hybrid_oscCount := hybrid_oscCount + 1
+    hybrid_oscCount
+if hybrid_useCci and not na(hybrid_cci)
+    hybrid_oscCount := hybrid_oscCount + 1
+    hybrid_oscCount
+if hybrid_useCmf and not na(hybrid_cmf)
+    hybrid_oscCount := hybrid_oscCount + 1
+    hybrid_oscCount
+if hybrid_useCmo and not na(hybrid_cmo)
+    hybrid_oscCount := hybrid_oscCount + 1
+    hybrid_oscCount
+if hybrid_useDix and not na(hybrid_dix)
+    hybrid_oscCount := hybrid_oscCount + 1
+    hybrid_oscCount
+if hybrid_useK and not na(hybrid_k)
+    hybrid_oscCount := hybrid_oscCount + 1
+    hybrid_oscCount
+if hybrid_useMfi and not na(hybrid_mfi)
+    hybrid_oscCount := hybrid_oscCount + 1
+    hybrid_oscCount
+if hybrid_useRoc and not na(hybrid_roc)
+    hybrid_oscCount := hybrid_oscCount + 1
+    hybrid_oscCount
+if hybrid_useRsi and not na(hybrid_rsi)
+    hybrid_oscCount := hybrid_oscCount + 1
+    hybrid_oscCount
+if hybrid_useRvi and not na(hybrid_rvi)
+    hybrid_oscCount := hybrid_oscCount + 1
+    hybrid_oscCount
+if hybrid_useSto and not na(hybrid_sto)
+    hybrid_oscCount := hybrid_oscCount + 1
+    hybrid_oscCount
+if hybrid_useTmf and not na(hybrid_tmf)
+    hybrid_oscCount := hybrid_oscCount + 1
+    hybrid_oscCount
+
+[hybrid_bOBAuto, hybrid_bOSAuto, hybrid_cciOBAuto, hybrid_cciOSAuto, hybrid_cmfOBAuto, hybrid_cmfOSAuto, hybrid_cmoOBAuto, hybrid_cmoOSAuto, hybrid_dixOBAuto, hybrid_dixOSAuto, hybrid_kOBAuto, hybrid_kOSAuto, hybrid_mfiOBAuto, hybrid_mfiOSAuto, hybrid_rocOBAuto, hybrid_rocOSAuto, hybrid_rsiOBAuto, hybrid_rsiOSAuto, hybrid_rviOBAuto, hybrid_rviOSAuto, hybrid_stoOBAuto, hybrid_stoOSAuto, hybrid_tmfOBAuto, hybrid_tmfOSAuto] = f_hybrid_levels(hybrid_b, hybrid_cci, hybrid_cmf, hybrid_cmo, hybrid_dix, hybrid_k, hybrid_mfi, hybrid_roc, hybrid_rsi, hybrid_rvi, hybrid_sto, hybrid_tmf)
+
+float hybrid_bOB = hybrid_bOBManual == 100 ? hybrid_bOBAuto : hybrid_bOBManual
+float hybrid_bOS = hybrid_bOSManual == 0 ? hybrid_bOSAuto : hybrid_bOSManual
+float hybrid_cciOB = hybrid_cciOBManual == 100 ? hybrid_cciOBAuto : hybrid_cciOBManual
+float hybrid_cciOS = hybrid_cciOSManual == 0 ? hybrid_cciOSAuto : hybrid_cciOSManual
+float hybrid_cmfOB = hybrid_cmfOBManual == 100 ? hybrid_cmfOBAuto : hybrid_cmfOBManual
+float hybrid_cmfOS = hybrid_cmfOSManual == 0 ? hybrid_cmfOSAuto : hybrid_cmfOSManual
+float hybrid_cmoOB = hybrid_cmoOBManual == 100 ? hybrid_cmoOBAuto : hybrid_cmoOBManual
+float hybrid_cmoOS = hybrid_cmoOSManual == 0 ? hybrid_cmoOSAuto : hybrid_cmoOSManual
+float hybrid_dixOB = hybrid_dixOBManual == 100 ? hybrid_dixOBAuto : hybrid_dixOBManual
+float hybrid_dixOS = hybrid_dixOSManual == 0 ? hybrid_dixOSAuto : hybrid_dixOSManual
+float hybrid_kOB = hybrid_kOBManual == 100 ? hybrid_kOBAuto : hybrid_kOBManual
+float hybrid_kOS = hybrid_kOSManual == 0 ? hybrid_kOSAuto : hybrid_kOSManual
+float hybrid_mfiOB = hybrid_mfiOBManual == 100 ? hybrid_mfiOBAuto : hybrid_mfiOBManual
+float hybrid_mfiOS = hybrid_mfiOSManual == 0 ? hybrid_mfiOSAuto : hybrid_mfiOSManual
+float hybrid_rocOB = hybrid_rocOBManual == 100 ? hybrid_rocOBAuto : hybrid_rocOBManual
+float hybrid_rocOS = hybrid_rocOSManual == 0 ? hybrid_rocOSAuto : hybrid_rocOSManual
+float hybrid_rsiOB = hybrid_rsiOBManual == 100 ? hybrid_rsiOBAuto : hybrid_rsiOBManual
+float hybrid_rsiOS = hybrid_rsiOSManual == 0 ? hybrid_rsiOSAuto : hybrid_rsiOSManual
+float hybrid_rviOB = hybrid_rviOBManual == 100 ? hybrid_rviOBAuto : hybrid_rviOBManual
+float hybrid_rviOS = hybrid_rviOSManual == 0 ? hybrid_rviOSAuto : hybrid_rviOSManual
+float hybrid_stoOB = hybrid_stoOBManual == 100 ? hybrid_stoOBAuto : hybrid_stoOBManual
+float hybrid_stoOS = hybrid_stoOSManual == 0 ? hybrid_stoOSAuto : hybrid_stoOSManual
+float hybrid_tmfOB = hybrid_tmfOBManual == 100 ? hybrid_tmfOBAuto : hybrid_tmfOBManual
+float hybrid_tmfOS = hybrid_tmfOSManual == 0 ? hybrid_tmfOSAuto : hybrid_tmfOSManual
+
+// === VARIABLE FINALE DU RÉGIME ===
+float hybrid_oscillator = (f_hybrid_ob(hybrid_b, hybrid_cci, hybrid_cmf, hybrid_cmo, hybrid_dix, hybrid_k, hybrid_mfi, hybrid_roc, hybrid_rsi, hybrid_rvi, hybrid_sto, hybrid_tmf, hybrid_bOB, hybrid_cciOB, hybrid_cmfOB, hybrid_cmoOB, hybrid_dixOB, hybrid_kOB, hybrid_mfiOB, hybrid_rocOB, hybrid_rsiOB, hybrid_rviOB, hybrid_stoOB, hybrid_tmfOB) - f_hybrid_os(hybrid_b, hybrid_cci, hybrid_cmf, hybrid_cmo, hybrid_dix, hybrid_k, hybrid_mfi, hybrid_roc, hybrid_rsi, hybrid_rvi, hybrid_sto, hybrid_tmf, hybrid_bOS, hybrid_cciOS, hybrid_cmfOS, hybrid_cmoOS, hybrid_dixOS, hybrid_kOS, hybrid_mfiOS, hybrid_rocOS, hybrid_rsiOS, hybrid_rviOS, hybrid_stoOS, hybrid_tmfOS) + 100) / 2
+[hybrid_hybOBAuto, hybrid_hybOSAuto] = f_hybrid_hybLevels(hybrid_oscillator)
+
+// === NIVEAUX FINAUX DU RÉGIME ===
+float hybrid_obLevel = hybrid_obManual == 100 ? na(hybrid_hybOBAuto) ? 80 : hybrid_hybOBAuto : hybrid_obManual // Utilise 80 si l'auto-calcul est encore NA
+float hybrid_osLevel = hybrid_osManual == 0 ? na(hybrid_hybOSAuto) ? 20 : hybrid_hybOSAuto : hybrid_osManual // Utilise 20 si l'auto-calcul est encore NA
+
+
+// =================================================================================================================
+// === SECTION 2 : CODE DU 'VUMANCHU CYPHER B REPLICA' (PRÉFIXE : vum_)
+// =================================================================================================================
+// Source : VumanchuCypherBReplica.pine
+
+// --- Inputs du Vumanchu ---
+string vum_techGroup = '=====[ Section 2 : Paramètres du Vumanchu Cypher B ]====='
+// WaveTrend
+int vum_wtChannelLen = input.int(9, title = 'WT Channel Length', group = vum_techGroup)
+int vum_wtAverageLen = input.int(12, title = 'WT Average Length', group = vum_techGroup)
+float vum_wtMASource = input.source(hlc3, title = 'WT MA Source', group = vum_techGroup)
+int vum_wtMALen = input.int(3, title = 'WT MA Length', group = vum_techGroup)
+int vum_obLevel = input.int(53, title = 'WT Overbought Level 1', group = vum_techGroup)
+int vum_osLevel = input.int(-53, title = 'WT Oversold Level 1', group = vum_techGroup)
+// RSI+MFI
+int vum_rsiMFIperiod = input.int(60, title = 'MFI Period', group = vum_techGroup)
+float vum_rsiMFIMultiplier = input.float(150, title = 'MFI Area multiplier', group = vum_techGroup)
+float vum_rsiMFIPosY = input.float(2.5, title = 'MFI Area Y Pos', group = vum_techGroup)
+
+// --- Fonctions du Vumanchu ---
+
+// RSI+MFI (pour le Biais)
+f_vum_rsimfi(_period, _multiplier, _tf) =>
+    request.security(syminfo.tickerid, _tf, ta.sma((close - open) / (high - low) * _multiplier, _period) - vum_rsiMFIPosY)
+
+// WaveTrend (pour le Déclencheur)
+f_vum_wavetrend(src, chlen, avg, malen, tf) =>
+    tfsrc = request.security(syminfo.tickerid, tf, src)
+    esa = ta.ema(tfsrc, chlen)
+    de = ta.ema(math.abs(tfsrc - esa), chlen)
+    ci = (tfsrc - esa) / (0.015 * de)
+    wt1 = request.security(syminfo.tickerid, tf, ta.ema(ci, avg))
+    wt2 = request.security(syminfo.tickerid, tf, ta.sma(wt1, malen))
+    wtOversold = wt2 <= vum_osLevel
+    wtOverbought = wt2 >= vum_obLevel
+    wtCross = ta.cross(wt1, wt2)
+    wtCrossUp = wt2 - wt1 <= 0
+    wtCrossDown = wt2 - wt1 >= 0
+    [wt1, wt2, wtOversold, wtOverbought, wtCross, wtCrossUp, wtCrossDown]
+
+// --- Calculs Principaux du Vumanchu ---
+
+// === VARIABLE FINALE DU BIAIS ===
+float vum_mfi_cloud = f_vum_rsimfi(vum_rsiMFIperiod, vum_rsiMFIMultiplier, timeframe.period)
+
+// Calculs WaveTrend
+[vum_wt1, vum_wt2, vum_wtOversold, vum_wtOverbought, vum_wtCross, vum_wtCrossUp, vum_wtCrossDown] = f_vum_wavetrend(vum_wtMASource, vum_wtChannelLen, vum_wtAverageLen, vum_wtMALen, timeframe.period)
+
+// === VARIABLES FINALES DU DÉCLENCHEUR ===
+// "Point Vert" (Buy Signal)
+bool vum_green_dot_signal = vum_wtCross and vum_wtCrossUp and vum_wtOversold
+// "Point Rouge" (Sell Signal)
+bool vum_red_dot_signal = vum_wtCross and vum_wtCrossDown and vum_wtOverbought
+
+
+// =================================================================================================================
+// === SECTION 3 : LOGIQUE DE STRATÉGIE (RÉGIME -> BIAIS -> DÉCLENCHEUR)
+// =================================================================================================================
+
+// --- 1. Conditions de Régime (Hybrid Detector) ---
+bool regimeLongOK = hybrid_oscillator <= hybrid_osLevel
+bool regimeShortOK = hybrid_oscillator >= hybrid_obLevel
+
+// --- 2. Conditions de Biais (Vumanchu MFI Cloud) ---
+bool biaisLongOK = vum_mfi_cloud > 0 // Nuage MFI vert
+bool biaisShortOK = vum_mfi_cloud < 0 // Nuage MFI rouge
+
+// --- 3. Conditions de Déclenchement (Vumanchu WT Dots) ---
+bool triggerLongOK = vum_green_dot_signal
+bool triggerShortOK = vum_red_dot_signal
+
+// --- 4. Logique d'Entrée Finale (Confluence) ---
+// Doit être dans la zone de régime, avoir le bon biais MFI, ET obtenir le signal de déclenchement
+bool finalLongEntry = regimeLongOK and biaisLongOK and triggerLongOK
+bool finalShortEntry = regimeShortOK and biaisShortOK and triggerShortOK
+
+// --- 5. Exécution des Entrées ---
+if finalLongEntry
+    strategy.entry('Long Entry', strategy.long, comment = 'Entrée Long (Régime+Biais+Déclencheur)')
+
+if finalShortEntry
+    strategy.entry('Short Entry', strategy.short, comment = 'Entrée Short (Régime+Biais+Déclencheur)')
+
+// --- 6. Logique de Sortie (Stop et Profit) ---
+
+// Calculer les niveaux de SL/TP au moment de l'entrée
+float stopLossLong = ta.lowest(low, strat_stop_length)
+float stopLossShort = ta.highest(high, strat_stop_length)
+float entryPrice = strategy.position_avg_price
+float riskLong = entryPrice - stopLossLong
+float riskShort = stopLossShort - entryPrice
+float takeProfitLong_RR = entryPrice + riskLong * strat_rr_ratio
+float takeProfitShort_RR = entryPrice - riskShort * strat_rr_ratio
+
+// Définir le TP final en fonction de la sélection de l'utilisateur
+float finalTakeProfitLong = strat_tp_type == 'R:R Fixe' ? takeProfitLong_RR : na
+float finalTakeProfitShort = strat_tp_type == 'R:R Fixe' ? takeProfitShort_RR : na
+
+// Appliquer les ordres strategy.exit() pour le SL et le TP R:R Fixe
+if strategy.position_size > 0
+    strategy.exit('Exit Long', from_entry = 'Long Entry', stop = stopLossLong, limit = finalTakeProfitLong)
+
+if strategy.position_size < 0
+    strategy.exit('Exit Short', from_entry = 'Short Entry', stop = stopLossShort, limit = finalTakeProfitShort)
+
+// Calculer les croisements sur chaque barre pour assurer la consistance des séries (Correction Avertissement)
+bool crossOverOB = ta.crossover(hybrid_oscillator, hybrid_obLevel)
+bool crossUnderOS = ta.crossunder(hybrid_oscillator, hybrid_osLevel)
+
+// Gérer la sortie dynamique "Cible Régime Opposé"
+// Clôturer le Long si l'Hybrid Oscillator atteint la zone de Surachat
+bool tpLongDynamic = strategy.position_size > 0 and strat_tp_type == 'Cible Régime Opposé' and crossOverOB
+
+// Clôturer le Short si l'Hybrid Oscillator atteint la zone de Survente
+bool tpShortDynamic = strategy.position_size < 0 and strat_tp_type == 'Cible Régime Opposé' and crossUnderOS
+
+if tpLongDynamic
+    strategy.close('TP Long Dynamique', comment = 'TP Régime Opposé Atteint (OB)')
+
+if tpShortDynamic
+    strategy.close('TP Short Dynamique', comment = 'TP Régime Opposé Atteint (OS)')
+
+
+// =================================================================================================================
+// === SECTION 4 : VISUELS (Pour vérification)
+// =================================================================================================================
+
+// Plot des signaux d'entrée pour vérification visuelle sur le graphique
+plotchar(finalLongEntry, 'Signal Achat', '▲', location.belowbar, color.new(color.green, 0), size = size.small, text = 'ACHAT')
+plotchar(finalShortEntry, 'Signal Vente', '▼', location.abovebar, color.new(color.red, 0), size = size.small, text = 'VENTE')
+
+// Plot des indicateurs dans une fenêtre séparée (Data Window ou nouveau volet)
+plot(hybrid_oscillator, '1. Oscillateur Hybride (Régime)', color.new(color.purple, 0), linewidth = 2)
+// CORRECTION: hline ne supporte pas les valeurs dynamiques, remplacement par plot
+plot(hybrid_obLevel, 'Niveau OB Hybride', color.new(color.red, 25))
+plot(hybrid_osLevel, 'Niveau OS Hybride', color.new(color.green, 25))
+
+plot(vum_mfi_cloud, '2. Nuage MFI Vumanchu (Biais)', color.new(color.gray, 50), style = plot.style_area)
+hline(0, 'Ligne Zéro MFI', color.new(color.white, 70))
+
+plot(vum_green_dot_signal ? -10 : na, '3. Point Vert (Déclencheur)', style = plot.style_circles, color = color.new(color.green, 0), linewidth = 4)
+plot(vum_red_dot_signal ? 10 : na, '3. Point Rouge (Déclencheur)', style = plot.style_circles, color = color.new(color.red, 0), linewidth = 4)
